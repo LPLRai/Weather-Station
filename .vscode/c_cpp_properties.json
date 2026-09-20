@@ -1,0 +1,75 @@
+{
+  "configurations": [
+    {
+      "name": "Win32",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include/c++/10.3.0/**"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include"
+        ],
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "defines": [
+        "F_CPU=80000000L",
+        "ARDUINO=10819",
+        "ARDUINO_ESP8266_NODEMCU_ESP12E",
+        "ARDUINO_ARCH_ESP8266",
+        "ARDUINO_BOARD=\"ESP8266_NODEMCU_ESP12E\"",
+        "ESP8266",
+        "__ets__",
+        "ICACHE_FLASH"
+      ],
+      "compilerPath": "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/bin/xtensa-lx106-elf-g++.exe",
+      "cStandard": "c11",
+      "cppStandard": "gnu++17",
+      "intelliSenseMode": "gcc-x86"
+    },
+    {
+      "name": "ESP8266",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include/**",
+        "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include/c++/10.3.0/**"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries",
+          "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include"
+        ],
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "defines": [
+        "F_CPU=80000000L",
+        "ARDUINO=10819",
+        "ARDUINO_ESP8266_NODEMCU_ESP12E",
+        "ARDUINO_ARCH_ESP8266",
+        "ARDUINO_BOARD=\"ESP8266_NODEMCU_ESP12E\"",
+        "ESP8266",
+        "__ets__",
+        "ICACHE_FLASH"
+      ],
+      "compilerPath": "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/bin/xtensa-lx106-elf-g++.exe",
+      "cStandard": "c11",
+      "cppStandard": "gnu++17",
+      "intelliSenseMode": "gcc-x86"
+    }
+  ],
+  "version": 4
+}

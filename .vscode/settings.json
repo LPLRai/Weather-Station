@@ -1,0 +1,18 @@
+{
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/**",
+    "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266/**",
+    "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu/**",
+    "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries/**",
+    "C:/Users/verse/AppData/Local/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include/**"
+  ],
+  "C_Cpp.default.defines": [
+    "F_CPU=80000000L",
+    "ARDUINO=10819",
+    "ARDUINO_ESP8266_NODEMCU_ESP12E",
+    "ESP8266",
+    "__ets__",
+    "ICACHE_FLASH"
+  ],
+  "C_Cpp.intelliSenseEngine": "default"
+}
