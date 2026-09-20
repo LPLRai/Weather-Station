@@ -4,24 +4,19 @@
 */
 
 #include <Arduino.h>
+#include "wind_speed.h"
 
 // ---- Pin Definition ----
 #define WIND_SENSOR_PIN D6   // GPIO12 on ESP12E
 
 // ---- Calibration ----
-// Radius of your anemometer (center to cup), in meters.
-// Measure this from your physical build - it directly affects accuracy.
 const float ANEMOMETER_RADIUS_M = 0.09;   // e.g. 9 cm - CHANGE to match your build
-
-// Number of magnet pulses per full rotation (usually 1, sometimes 2 if you placed 2 magnets)
 const int PULSES_PER_ROTATION = 1;
-
-// How often we calculate and report speed (ms)
 const unsigned long SAMPLE_INTERVAL_MS = 2000;
 
 // ---- Globals ----
 volatile unsigned long pulseCount = 0;
-unsigned long lastSampleTime = 0;
+unsigned long lastSampleTimeSpeed = 0;
 
 unsigned long totalPulses = 0;   // lifetime pulse count
 unsigned long totalSpins = 0;    // lifetime full rotations
@@ -31,59 +26,48 @@ void IRAM_ATTR handlePulse() {
   pulseCount++;
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(WIND_SENSOR_PIN, INPUT_PULLUP); // Hall sensor usually open-drain, pullup needed
+void setupWindSpeed() {
+  pinMode(WIND_SENSOR_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(WIND_SENSOR_PIN), handlePulse, FALLING);
 
-  lastSampleTime = millis();
-  Serial.println("Wind speed sensor ready...");
+  lastSampleTimeSpeed = millis();
+  //Serial.println(F("[speed] Wind speed sensor ready..."));
 }
 
-void loop() {
+void readWindSpeed() {
   unsigned long now = millis();
 
-  if (now - lastSampleTime >= SAMPLE_INTERVAL_MS) {
+  if (now - lastSampleTimeSpeed >= SAMPLE_INTERVAL_MS) {
     // Safely grab and reset pulse count
     noInterrupts();
     unsigned long pulses = pulseCount;
     pulseCount = 0;
     interrupts();
 
-    float elapsedSeconds = (now - lastSampleTime) / 1000.0;
-    lastSampleTime = now;
+    float elapsedSeconds = (now - lastSampleTimeSpeed) / 1000.0;
+    lastSampleTimeSpeed = now;
 
     // Rotations in this window
     float rotations = pulses / (float)PULSES_PER_ROTATION;
-
-    // Rotations per second
     float rps = rotations / elapsedSeconds;
-
-    // RPM (human-readable rotational speed)
     float rpm = rps * 60.0;
-
-    // Circumference swept by the cup = 2 * pi * radius
     float circumference = 2.0 * PI * ANEMOMETER_RADIUS_M;
-
-    // Linear speed in m/s = rotations per second * circumference
     float speedMS = rps * circumference;
-
-    // Convert to km/h
     float speedKMH = speedMS * 3.6;
 
     // Update lifetime counters
     totalPulses += pulses;
     totalSpins += (unsigned long)rotations;
 
-    Serial.print("Pulses: ");
+    Serial.print(F("[speed] Pulses: "));
     Serial.print(pulses);
-    Serial.print(" | Spins: ");
+    Serial.print(F(" | Spins: "));
     Serial.print(rotations, 2);
-    Serial.print(" | RPM: ");
+    Serial.print(F(" | RPM: "));
     Serial.print(rpm, 2);
-    Serial.print(" | Speed: ");
+    Serial.print(F(" | Speed: "));
     Serial.print(speedKMH, 2);
-    Serial.print(" km/h | Total Spins: ");
+    Serial.print(F(" km/h | Total Spins: "));
     Serial.println(totalSpins);
   }
 }

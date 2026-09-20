@@ -20,8 +20,8 @@
 #define D2 4
 #endif
 
-#define I2C_SCL_PIN D1 // GPIO5
-#define I2C_SDA_PIN D2 // GPIO4
+#define I2C_SCL_PIN D1  // GPIO5
+#define I2C_SDA_PIN D2  // GPIO4
 
 // =====================================================================
 // Serial
@@ -48,7 +48,7 @@
 // 4) If N reads correctly but rotating clockwise makes the reading go
 //    the wrong way (e.g. N -> NW -> W instead of N -> NE -> E), set
 //    WIND_DIR_INVERT to true below and repeat steps 1-3.
-#define WIND_DIR_OFFSET_DEG -333.1f
+#define WIND_DIR_OFFSET_DEG -321.1f 
 
 // Some mounts turn the magnet the "wrong" way relative to compass
 // rotation (e.g. gear/belt coupling). See step 4 above.

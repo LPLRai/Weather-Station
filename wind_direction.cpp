@@ -17,114 +17,118 @@
 #include <Wire.h>
 #include <math.h>
 
-static const uint8_t REG_STATUS = 0x0B;
+static const uint8_t REG_STATUS    = 0x0B;
 static const uint8_t REG_RAW_ANGLE = 0x0C; // + 0x0D low byte
-static const uint8_t REG_AGC = 0x1A;
+static const uint8_t REG_AGC       = 0x1A;
 static const uint8_t REG_MAGNITUDE = 0x1B; // + 0x1C low byte
 
 static const uint8_t STATUS_MH_BIT = 3; // magnet too strong
 static const uint8_t STATUS_ML_BIT = 4; // magnet too weak
 static const uint8_t STATUS_MD_BIT = 5; // magnet detected
 
-static const char *COMPASS_POINTS[16] = {
-    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+static const char* COMPASS_POINTS[16] = {
+  "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+  "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+};
 
 WindDirection::WindDirection(uint8_t i2cAddress)
-    : _addr(i2cAddress), _offsetDeg(WIND_DIR_OFFSET_DEG) {}
+  : _addr(i2cAddress), _offsetDeg(WIND_DIR_OFFSET_DEG) {}
 
-bool WindDirection::begin(int sdaPin, int sclPin)
-{
+bool WindDirection::begin(int sdaPin, int sclPin) {
   Wire.begin(sdaPin, sclPin);
   Wire.beginTransmission(_addr);
   uint8_t err = Wire.endTransmission();
   return (err == 0);
 }
 
-uint8_t WindDirection::readReg8(uint8_t reg)
-{
+uint8_t WindDirection::readReg8(uint8_t reg) {
   Wire.beginTransmission(_addr);
   Wire.write(reg);
-  Wire.endTransmission(false); // repeated start, keep the bus
-  Wire.requestFrom((int)_addr, 1);
-  if (Wire.available() < 1)
+  // Full STOP here (not a repeated start) - matches RobTillaart/AS5600's
+  // battle-tested readReg(), which is more broadly compatible across
+  // ESP8266/ESP32/AVR Wire implementations than a repeated start.
+  if (Wire.endTransmission() != 0) {
+    _i2cError = true;
     return 0;
+  }
+  int n = Wire.requestFrom((int)_addr, 1);
+  if (n < 1) {
+    _i2cError = true;
+    return 0;
+  }
+  _i2cError = false;
   return Wire.read();
 }
 
-uint16_t WindDirection::readReg16(uint8_t highReg)
-{
+uint16_t WindDirection::readReg16(uint8_t highReg) {
   Wire.beginTransmission(_addr);
   Wire.write(highReg);
-  Wire.endTransmission(false);
-  Wire.requestFrom((int)_addr, 2);
-  if (Wire.available() < 2)
+  if (Wire.endTransmission() != 0) {
+    _i2cError = true;
     return 0;
+  }
+  int n = Wire.requestFrom((int)_addr, 2);
+  if (n < 2) {
+    _i2cError = true;
+    return 0;
+  }
+  _i2cError = false;
   uint8_t hi = Wire.read();
   uint8_t lo = Wire.read();
   return ((uint16_t)(hi & 0x0F) << 8) | lo; // top nibble of hi is reserved
 }
 
-uint8_t WindDirection::readStatusRegister()
-{
+uint8_t WindDirection::readStatusRegister() {
   return readReg8(REG_STATUS);
 }
 
-uint16_t WindDirection::readRawAngleRegister()
-{
+uint16_t WindDirection::readRawAngleRegister() {
   return readReg16(REG_RAW_ANGLE);
 }
 
-bool WindDirection::isMagnetDetected()
-{
+bool WindDirection::isMagnetDetected() {
   return bitRead(readStatusRegister(), STATUS_MD_BIT);
 }
 
-MagnetStatus WindDirection::getMagnetStatus()
-{
+MagnetStatus WindDirection::getMagnetStatus() {
   MagnetStatus s;
   uint8_t status = readStatusRegister();
-  s.detected = bitRead(status, STATUS_MD_BIT);
-  s.tooWeak = bitRead(status, STATUS_ML_BIT);
+  s.i2cOk     = !_i2cError;
+  s.detected  = bitRead(status, STATUS_MD_BIT);
+  s.tooWeak   = bitRead(status, STATUS_ML_BIT);
   s.tooStrong = bitRead(status, STATUS_MH_BIT);
-  s.agc = readReg8(REG_AGC);
+  s.agc       = readReg8(REG_AGC);
   s.magnitude = readReg16(REG_MAGNITUDE);
   return s;
 }
 
-float WindDirection::rawToDegrees(uint16_t raw)
-{
+float WindDirection::rawToDegrees(uint16_t raw) {
   // 12-bit count (0-4095) maps onto one full 360 deg turn.
   return (raw * 360.0f) / 4096.0f;
 }
 
-float WindDirection::applyCalibration(float rawDegrees, float offsetDeg, bool invert)
-{
+float WindDirection::applyCalibration(float rawDegrees, float offsetDeg, bool invert) {
   float deg = invert ? (360.0f - rawDegrees) : rawDegrees;
   deg += offsetDeg;
   deg = fmodf(deg, 360.0f);
-  if (deg < 0)
-    deg += 360.0f;
+  if (deg < 0) deg += 360.0f;
   return deg;
 }
 
-const char *WindDirection::degreesToCompass(float degrees)
-{
+const char* WindDirection::degreesToCompass(float degrees) {
   // 16 points, 22.5 deg wide each, centered on the point itself
   // (so e.g. 348.75-360 and 0-11.24 both map to "N").
   int index = ((int)((degrees + 11.25f) / 22.5f)) % 16;
-  if (index < 0)
-    index += 16;
+  if (index < 0) index += 16;
   return COMPASS_POINTS[index];
 }
 
-WindReading WindDirection::read()
-{
+WindReading WindDirection::read() {
   WindReading r;
   r.rawAngle = readRawAngleRegister();
   uint8_t status = readStatusRegister();
-  r.valid = bitRead(status, STATUS_MD_BIT);
-  r.tooWeak = bitRead(status, STATUS_ML_BIT);
+  r.valid     = bitRead(status, STATUS_MD_BIT);
+  r.tooWeak   = bitRead(status, STATUS_ML_BIT);
   r.tooStrong = bitRead(status, STATUS_MH_BIT);
 
   float raw = rawToDegrees(r.rawAngle);
@@ -133,8 +137,7 @@ WindReading WindDirection::read()
   return r;
 }
 
-float WindDirection::recordStartupDirection()
-{
+float WindDirection::recordStartupDirection() {
   // Average a handful of samples to smooth out sensor noise, then bake
   // the result into the offset so the vane's position right now reads
   // as WIND_DIR_OFFSET_DEG (0 deg / "N" by default) going forward.
@@ -142,20 +145,17 @@ float WindDirection::recordStartupDirection()
   float sum = 0.0f;
   int good = 0;
 
-  for (int i = 0; i < SAMPLES; i++)
-  {
+  for (int i = 0; i < SAMPLES; i++) {
     uint16_t raw = readRawAngleRegister();
     bool detected = bitRead(readStatusRegister(), STATUS_MD_BIT);
-    if (detected)
-    {
+    if (detected) {
       sum += rawToDegrees(raw);
       good++;
     }
     delay(10);
   }
 
-  if (good == 0)
-  {
+  if (good == 0) {
     // Magnet not seen at all during calibration — leave the offset as
     // configured in config.h rather than guessing.
     return -1.0f;
