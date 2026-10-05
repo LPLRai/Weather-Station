@@ -1,14 +1,19 @@
 // weather_station.ino
 //
 // Main sketch for an ESP-12E based weather recording device.
-// Currently wires up the AS5600 wind-direction sensor (see
-// wind_direction.h/.cpp) and prints readings to the Serial monitor.
+// Wires up the AS5600 wind-direction sensor (wind_direction.h/.cpp),
+// the rain gauge (rain_gauge.h/.cpp) and the hall-effect wind speed
+// sensor (wind_speed.h/.cpp), and prints readings to the Serial monitor.
 // Designed to be extended with more sensors later (each as its own
 // module, following the same pattern as wind_direction).
 //
 #include <Arduino.h>
 #include "wind_direction_config.h"
 #include "wind_direction.h"
+#include "rain_gauge.h"
+#include "wind_speed.h"
+#include "wind_speed_config.h"
+#include "rain_gauge_config.h"
 
 WindDirection windSensor;
 
@@ -18,6 +23,7 @@ void setup() {
   Serial.println();
   Serial.println(F("=== Weather station booting ==="));
 
+  // ---------------- Wind direction (AS5600) ----------------
   if (!windSensor.begin(I2C_SDA_PIN, I2C_SCL_PIN)) {
     Serial.println(F("[wind] ERROR: AS5600 did not ACK on I2C. Check wiring/address (0x36)."));
   } else {
@@ -62,20 +68,38 @@ void setup() {
     Serial.println(F(" deg raw -> this position is now the 0 deg / N reference."));
   }
 #else
-  Serial.print(F("[wind] Using fixed calibration offset from config.h: "));
+  Serial.print(F("[wind] Using fixed calibration offset from wind_direction_config.h: "));
   Serial.print((float)WIND_DIR_OFFSET_DEG, 1);
   Serial.println(F(" deg. Point the vane north and confirm deg reads ~0 below."));
 #endif
+
+  // ---------------- Rain gauge ----------------
+  rainSensor.begin();
+  Serial.print(F("[rain] Sensor ready on pin "));
+  Serial.print(RAIN_SENSOR_PIN);
+  Serial.print(F(". mm/tip="));
+  Serial.print(RAIN_MM_PER_TIP, 4);
+  Serial.print(F("  print interval="));
+  Serial.print(RAIN_PRINT_INTERVAL_MS);
+  Serial.println(F(" ms."));
+
+  // ---------------- Wind speed (hall effect) ----------------
+  setupWindSpeed();
+  Serial.println(F("[speed] Hall sensor ready on pin D6 (GPIO12)."));
 
   Serial.println(F("=== Setup complete, starting readings ==="));
 }
 
 void loop() {
-  static unsigned long lastSample = 0;
   unsigned long now = millis();
 
-  if (now - lastSample >= SAMPLE_INTERVAL_MS) {
-    lastSample = now;
+  // Wind speed: has its own internal timer, so call it every loop.
+  readWindSpeed();
+
+  // Wind direction
+  static unsigned long lastWindSample = 0;
+  if (now - lastWindSample >= SAMPLE_INTERVAL_MS) {
+    lastWindSample = now;
 
     WindReading w = windSensor.read();
 
@@ -93,5 +117,16 @@ void loop() {
       Serial.print(F("  (!) magnet too strong/close"));
     }
     Serial.println();
+  }
+
+  // Runs every loop iteration (not interval-gated) so tip counts move
+  // from the ISR into the rolling buckets promptly and the minute/hour/
+  // day rollovers happen on schedule.
+  rainSensor.update();
+
+  static unsigned long lastRainPrint = 0;
+  if (now - lastRainPrint >= RAIN_PRINT_INTERVAL_MS) {
+    lastRainPrint = now;
+    rainSensor.printCompact();
   }
 }

@@ -1,18 +1,12 @@
 /*
   Wind Speed Sensor (Hall Effect) - ESP12E (ESP8266)
   Wiring: Hall sensor OUT -> D6 (GPIO12), VCC -> 3V3, GND -> GND
+  Settings live in wind_speed_config.h
 */
 
 #include <Arduino.h>
 #include "wind_speed.h"
-
-// ---- Pin Definition ----
-#define WIND_SENSOR_PIN D6   // GPIO12 on ESP12E
-
-// ---- Calibration ----
-const float ANEMOMETER_RADIUS_M = 0.09;   // e.g. 9 cm - CHANGE to match your build
-const int PULSES_PER_ROTATION = 1;
-const unsigned long SAMPLE_INTERVAL_MS = 2000;
+#include "wind_speed_config.h"
 
 // ---- Globals ----
 volatile unsigned long pulseCount = 0;
@@ -27,17 +21,16 @@ void IRAM_ATTR handlePulse() {
 }
 
 void setupWindSpeed() {
-  pinMode(WIND_SENSOR_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(WIND_SENSOR_PIN), handlePulse, FALLING);
+  pinMode(WIND_SPEED_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(WIND_SPEED_PIN), handlePulse, FALLING);
 
   lastSampleTimeSpeed = millis();
-  //Serial.println(F("[speed] Wind speed sensor ready..."));
 }
 
 void readWindSpeed() {
   unsigned long now = millis();
 
-  if (now - lastSampleTimeSpeed >= SAMPLE_INTERVAL_MS) {
+  if (now - lastSampleTimeSpeed >= WIND_SPEED_SAMPLE_INTERVAL_MS) {
     // Safely grab and reset pulse count
     noInterrupts();
     unsigned long pulses = pulseCount;
@@ -48,17 +41,18 @@ void readWindSpeed() {
     lastSampleTimeSpeed = now;
 
     // Rotations in this window
-    float rotations = pulses / (float)PULSES_PER_ROTATION;
+    float rotations = pulses / (float)WIND_SPEED_PULSES_PER_ROTATION;
     float rps = rotations / elapsedSeconds;
     float rpm = rps * 60.0;
-    float circumference = 2.0 * PI * ANEMOMETER_RADIUS_M;
-    float speedMS = rps * circumference;
+    float circumference = 2.0 * PI * WIND_SPEED_RADIUS_M;
+    float speedMS = rps * circumference * WIND_SPEED_CALIBRATION_FACTOR;
     float speedKMH = speedMS * 3.6;
 
     // Update lifetime counters
     totalPulses += pulses;
     totalSpins += (unsigned long)rotations;
 
+#if WIND_SPEED_PRINT_ENABLED
     Serial.print(F("[speed] Pulses: "));
     Serial.print(pulses);
     Serial.print(F(" | Spins: "));
@@ -69,5 +63,6 @@ void readWindSpeed() {
     Serial.print(speedKMH, 2);
     Serial.print(F(" km/h | Total Spins: "));
     Serial.println(totalSpins);
+#endif
   }
 }

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Station Serial Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0f1115;--panel:#171a21;--panel2:#1b1f27;--border:#262b33;--text:#e4e6eb;--muted:#848b99;
+  --wind:#73d977;--dir:#5ee3c0;--rain:#4fa8ff;--warn:#eab839;--err:#ff8a8a;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono',Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px var(--sans);display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--border)}
+.brand{font-weight:600;font-size:14px;display:flex;align-items:center;gap:9px}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--rain);box-shadow:0 0 8px var(--rain)}
+.spacer{flex:1}
+button,select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:6px 12px;font-size:12px;cursor:pointer}
+button:hover{border-color:#3a4150}
+button.primary{background:#1f5fa8;border-color:#1f5fa8;color:#fff}
+button.primary:hover{background:var(--rain)}
+select{font-family:var(--mono)}
+.status{display:flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--muted)}
+.led{width:8px;height:8px;border-radius:50%;background:#5a6270}
+.status.live .led{background:var(--wind);box-shadow:0 0 6px var(--wind)}
+.status.sim .led{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+main{padding:16px 18px 28px;max-width:1400px;width:100%;margin:0 auto}
+.label{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin:20px 0 8px}
+.label:first-child{margin-top:0}
+.grid{display:grid;gap:10px}
+.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.two{grid-template-columns:1fr 1fr}
+@media(max-width:800px){.two{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:12px 14px}
+.panel h3{margin:0 0 8px;font-size:11.5px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+.num{font:700 30px/1.1 var(--mono)}
+.unit{font:12px var(--mono);color:var(--muted);margin-left:4px}
+.sub{font:11px var(--mono);color:var(--muted);margin-top:4px;min-height:14px}
+.c-wind{color:var(--wind)}.c-dir{color:var(--dir)}.c-rain{color:var(--rain)}
+.age{font:10.5px var(--mono);padding:2px 6px;border-radius:3px;background:var(--panel2);color:var(--muted)}
+.age.ok{color:var(--wind)}.age.stale{color:var(--warn)}.age.none{color:var(--err)}
+.chart{position:relative;height:220px}
+.compass{display:flex;gap:14px;align-items:center}
+.compass svg{width:96px;height:96px;flex-shrink:0}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.chip{display:flex;align-items:center;gap:5px;font:11px var(--mono);color:var(--muted);cursor:pointer;user-select:none}
+.chip input{accent-color:var(--rain)}
+.terminal{font:12px/1.5 var(--mono);background:#06070a;border:1px solid var(--border);border-radius:4px;padding:10px 12px;height:340px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:#8fe39a}
+.terminal div.t-wind{color:#5ee3c0}.terminal div.t-speed{color:#73d977}.terminal div.t-rain{color:#4fa8ff}
+.terminal div.t-other{color:#b8bfcc}.terminal div.t-sys{color:var(--warn)}.terminal div.t-err{color:var(--err)}
+.terminal .ts{color:#5a6270}
+.warn{display:none;background:#2a2208;border:1px solid #5c4a10;color:var(--warn);border-radius:4px;padding:8px 12px;margin-bottom:10px;font-size:12px}
+.warn.show{display:block}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span>Weather Station <span style="color:var(--muted);font-weight:400">/ Serial Dashboard</span></div>
+  <div class="spacer"></div>
+  <div class="status" id="status"><span class="led"></span><span id="statusText">disconnected</span></div>
+  <select id="baud" title="Baud rate"><option>9600</option><option selected>115200</option><option>74880</option><option>57600</option></select>
+  <button class="primary" id="btnUsb">Connect via USB</button>
+  <button id="btnSim">Simulate</button>
+</header>
+
+<main>
+  <div class="warn" id="warn"></div>
+
+  <div class="label">Wind</div>
+  <div class="grid cards">
+    <div class="panel"><h3>Speed <span class="age none" id="age-speed">no data</span></h3>
+      <div><span class="num c-wind" id="v-speed">--</span><span class="unit">km/h</span></div>
+      <div class="sub" id="s-speed">&nbsp;</div></div>
+    <div class="panel"><h3>Rotation</h3>
+      <div><span class="num c-wind" id="v-rpm">--</span><span class="unit">RPM</span></div>
+      <div class="sub" id="s-rpm">&nbsp;</div></div>
+    <div class="panel"><h3>Total Spins</h3>
+      <div><span class="num c-wind" id="v-spins">--</span></div>
+      <div class="sub" id="s-pulses">&nbsp;</div></div>
+    <div class="panel"><h3>Direction <span class="age none" id="age-wind">no data</span></h3>
+      <div class="compass">
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="none" stroke="#262b33" stroke-width="2"/>
+          <text x="50" y="14" text-anchor="middle" fill="#848b99" font-size="9" font-family="monospace">N</text>
+          <text x="90" y="53" text-anchor="middle" fill="#848b99" font-size="9" font-family="monospace">E</text>
+          <text x="50" y="94" text-anchor="middle" fill="#848b99" font-size="9" font-family="monospace">S</text>
+          <text x="10" y="53" text-anchor="middle" fill="#848b99" font-size="9" font-family="monospace">W</text>
+          <g id="needle" style="transform-origin:50px 50px;transition:transform .4s"><polygon points="50,18 45,50 55,50" fill="#5ee3c0"/><polygon points="50,82 45,50 55,50" fill="#3a4150"/></g>
+          <circle cx="50" cy="50" r="3" fill="#e4e6eb"/></svg>
+        <div><div><span class="num c-dir" id="v-deg">--</span><span class="unit">°</span></div>
+        <div class="sub" id="v-compass" style="font-size:14px;color:var(--dir)">--</div></div>
+      </div></div>
+    <div class="panel"><h3>Magnet</h3>
+      <div><span class="num" id="v-magnet" style="font-size:20px">--</span></div>
+      <div class="sub" id="s-magnet">from boot diagnostics</div></div>
+  </div>
+
+  <div class="label">Rain</div>
+  <div class="grid cards">
+    <div class="panel"><h3>Rate <span class="age none" id="age-rain">no data</span></h3>
+      <div><span class="num c-rain" id="v-rate">--</span><span class="unit">mm/h</span></div>
+      <div class="sub" id="v-raining">&nbsp;</div></div>
+    <div class="panel"><h3>Today</h3><div><span class="num c-rain" id="v-today">--</span><span class="unit">mm</span></div></div>
+    <div class="panel"><h3>Week</h3><div><span class="num c-rain" id="v-week">--</span><span class="unit">mm</span></div></div>
+    <div class="panel"><h3>Month</h3><div><span class="num c-rain" id="v-month">--</span><span class="unit">mm</span></div></div>
+    <div class="panel"><h3>Total</h3><div><span class="num c-rain" id="v-total">--</span><span class="unit">mm</span></div>
+      <div class="sub" id="v-tips">&nbsp;</div></div>
+  </div>
+
+  <div class="label">Trends</div>
+  <div class="grid two">
+    <div class="panel"><h3>Wind speed &amp; direction</h3><div class="chart"><canvas id="chWind"></canvas></div></div>
+    <div class="panel"><h3>Rain rate &amp; total</h3><div class="chart"><canvas id="chRain"></canvas></div></div>
+  </div>
+
+  <div class="label">Serial monitor</div>
+  <div class="panel">
+    <div class="tools">
+      <label class="chip"><input type="checkbox" data-f="wind" checked>[wind]</label>
+      <label class="chip"><input type="checkbox" data-f="speed" checked>[speed]</label>
+      <label class="chip"><input type="checkbox" data-f="rain" checked>[rain]</label>
+      <label class="chip"><input type="checkbox" data-f="other" checked>other</label>
+      <label class="chip"><input type="checkbox" id="autoscroll" checked>autoscroll</label>
+      <span class="spacer"></span>
+      <button id="btnPause">Pause</button>
+      <button id="btnSave">Download log</button>
+      <button id="btnClear">Clear</button>
+    </div>
+    <div class="terminal" id="term"><div class="t-sys">not connected. Click "Connect via USB" (desktop Chrome or Edge) or "Simulate" to preview.</div></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const MAXPTS = 120, MAXLINES = 1500;
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const lastSeen = {speed:0, wind:0, rain:0};
+const series = {labels:[], speed:[], deg:[], rate:[], total:[]};
+const lines = [];           // full log for download
+let paused = false, port = null, reader = null, keepReading = false, simTimer = null, connectedAt = 0;
+
+/* ---------- terminal ---------- */
+function classify(line){
+  const m = line.match(/^\s*\[(wind|speed|rain)\]/i);
+  return m ? m[1].toLowerCase() : 'other';
+}
+function filters(){
+  const f = {}; document.querySelectorAll('[data-f]').forEach(c => f[c.dataset.f] = c.checked); return f;
+}
+function addTerm(text, cls){
+  const stamp = new Date().toLocaleTimeString([], {hour12:false});
+  lines.push(`[${stamp}] ${text}`); if (lines.length > 20000) lines.shift();
+  const div = document.createElement('div');
+  div.className = cls; div.dataset.kind = cls.replace('t-','');
+  div.innerHTML = `<span class="ts">[${stamp}]</span> `;
+  div.append(document.createTextNode(text));
+  if (['t-sys','t-err'].includes(cls) === false && !filters()[div.dataset.kind]) div.style.display = 'none';
+  const t = $('term');
+  t.appendChild(div);
+  while (t.childElementCount > MAXLINES) t.removeChild(t.firstChild);
+  if ($('autoscroll').checked) t.scrollTop = t.scrollHeight;
+}
+document.querySelectorAll('[data-f]').forEach(c => c.addEventListener('change', () => {
+  const f = filters();
+  document.querySelectorAll('#term div').forEach(d => {
+    const k = d.dataset.kind; if (k in f) d.style.display = f[k] ? '' : 'none';
+  });
+}));
+$('btnClear').onclick = () => { $('term').innerHTML = ''; lines.length = 0; };
+$('btnPause').onclick = () => { paused = !paused; $('btnPause').textContent = paused ? 'Resume' : 'Pause'; };
+$('btnSave').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], {type:'text/plain'}));
+  a.download = 'weather-serial-' + new Date().toISOString().replace(/[:.]/g,'-') + '.log'; a.click();
+};
+
+/* ---------- parsing ---------- */
+const num = (s, re) => { const m = s.match(re); return m ? parseFloat(m[1]) : null; };
+
+function parseLine(line){
+  const kind = classify(line);
+  const now = Date.now();
+
+  if (kind === 'speed'){
+    const speed = num(line, /Speed:\s*(-?[\d.]+)\s*km\/h/i);
+    if (speed === null) return;
+    lastSeen.speed = now;
+    const rpm = num(line, /RPM:\s*(-?[\d.]+)/i), pulses = num(line, /Pulses:\s*(\d+)/i);
+    const spins = num(line, /Total Spins:\s*(\d+)/i), win = num(line, /Spins:\s*([\d.]+)\s*\|/i);
+    $('v-speed').textContent = speed.toFixed(1);
+    $('v-rpm').textContent = rpm !== null ? rpm.toFixed(1) : '--';
+    $('v-spins').textContent = spins !== null ? spins : '--';
+    $('s-pulses').textContent = pulses !== null ? `${pulses} pulses last window` : '';
+    $('s-speed').textContent = speed === 0 && pulses === 0 ? 'no pulses (calm or no signal)' : '';
+    $('s-rpm').textContent = win !== null ? `${win.toFixed(2)} rotations/window` : '';
+    pushPoint({speed});
+  }
+  else if (kind === 'rain'){
+    const rate = num(line, /rate:\s*(-?[\d.]+)/i);
+    if (rate === null) return;
+    lastSeen.rain = now;
+    const total = num(line, /total:\s*(-?[\d.]+)/i);
+    $('v-rate').textContent = rate.toFixed(2);
+    $('v-today').textContent = (num(line, /today:\s*(-?[\d.]+)/i) ?? 0).toFixed(2);
+    $('v-week').textContent = (num(line, /week:\s*(-?[\d.]+)/i) ?? 0).toFixed(2);
+    $('v-month').textContent = (num(line, /month:\s*(-?[\d.]+)/i) ?? 0).toFixed(2);
+    $('v-total').textContent = (total ?? 0).toFixed(2);
+    const tips = num(line, /tips:\s*(\d+)/i);
+    $('v-tips').textContent = tips !== null ? `${tips} tips` : '';
+    $('v-raining').textContent = /RAINING/.test(line) ? 'raining now' : 'dry';
+    pushPoint({rate, total});
+  }
+  else if (kind === 'wind'){
+    const deg = num(line, /deg(?:rees)?\s*[=:]\s*(-?[\d.]+)/i);
+    if (deg !== null){
+      lastSeen.wind = now;
+      const d = ((deg % 360) + 360) % 360;
+      const cm = line.match(/\bdir=([A-Z]{1,3})\b/);
+      $('v-deg').textContent = d.toFixed(1);
+      $('v-compass').textContent = cm ? cm[1] : COMPASS[Math.round(d / 22.5) % 16];
+      $('needle').style.transform = `rotate(${d}deg)`;
+      pushPoint({deg: d});
+      // per-sample magnet warnings printed by the sketch's loop()
+      const bad = line.match(/\(!\)\s*(magnet[^\n]*)/i);
+      if (bad){ $('v-magnet').textContent = 'WARNING'; $('v-magnet').style.color = 'var(--warn)'; $('s-magnet').textContent = bad[1].trim(); }
+      else if ($('v-magnet').textContent === 'WARNING'){ $('v-magnet').textContent = 'ok'; $('v-magnet').style.color = 'var(--wind)'; $('s-magnet').textContent = ''; }
+    }
+  }
+  // boot-time magnet diagnostics (any tag)
+  if (/magnet detected \(MD\)/i.test(line)){
+    const yes = /:\s*yes/i.test(line);
+    $('v-magnet').textContent = yes ? 'detected' : 'NOT detected';
+    $('v-magnet').style.color = yes ? 'var(--wind)' : 'var(--err)';
+  }
+  if (/\(ML\):\s*YES/.test(line)) $('s-magnet').textContent = 'too weak / too far';
+  if (/\(MH\):\s*YES/.test(line)) $('s-magnet').textContent = 'too strong / too close';
+  const agc = line.match(/AGC[^:]*:\s*(\d+)/), mag = line.match(/Magnitude[^:]*:\s*(\d+)/);
+  if (agc) $('s-magnet').textContent = `AGC ${agc[1]}`;
+  if (mag) $('s-magnet').textContent += ` · magnitude ${mag[1]}`;
+  if (/AS5600 did not ACK|I2C read failed/i.test(line)){
+    $('v-magnet').textContent = 'I2C ERROR'; $('v-magnet').style.color = 'var(--err)'; $('s-magnet').textContent = 'wiring problem (SDA/SCL/power)';
+  }
+  if (/Magnet looks well positioned/i.test(line)){ $('v-magnet').textContent = 'ok'; $('v-magnet').style.color = 'var(--wind)'; }
+}
+
+/* ---------- charts ---------- */
+let pending = {};
+function pushPoint(p){ Object.assign(pending, p); }
+setInterval(() => {   // one chart row per second, carrying forward last values
+  if (!Object.keys(pending).length) return;
+  const last = i => series[i].length ? series[i][series[i].length-1] : null;
+  series.labels.push(new Date().toLocaleTimeString([], {hour12:false}));
+  series.speed.push(pending.speed ?? last('speed'));
+  series.deg.push(pending.deg ?? last('deg'));
+  series.rate.push(pending.rate ?? last('rate'));
+  series.total.push(pending.total ?? last('total'));
+  pending = {};
+  if (series.labels.length > MAXPTS) Object.values(series).forEach(a => a.shift());
+  [chWind, chRain].forEach(c => c && c.update('none'));
+}, 1000);
+
+let chWind, chRain;
+try {
+Chart.defaults.color = '#848b99'; Chart.defaults.borderColor = '#262b33';
+Chart.defaults.font.family = "ui-monospace, Consolas, monospace";
+const opt = (y1, y2, t1, t2) => ({responsive:true, maintainAspectRatio:false, animation:false, spanGaps:true,
+  interaction:{mode:'index', intersect:false},
+  scales:{ x:{ticks:{maxTicksLimit:6}}, y:{beginAtZero:true, title:{display:true,text:t1}},
+           y2:{position:'right', beginAtZero:true, grid:{drawOnChartArea:false}, title:{display:true,text:t2}, ...y2} },
+  plugins:{legend:{labels:{boxWidth:10}}}});
+chWind = new Chart($('chWind'), {type:'line', data:{labels:series.labels, datasets:[
+  {label:'Speed (km/h)', data:series.speed, borderColor:'#73d977', backgroundColor:'#73d97722', fill:true, tension:.3, pointRadius:0, yAxisID:'y'},
+  {label:'Direction (°)', data:series.deg, borderColor:'#5ee3c0', borderDash:[4,3], tension:.3, pointRadius:0, yAxisID:'y2'}]},
+  options:opt({max:360}, null, 'km/h', 'degrees')});
+chRain = new Chart($('chRain'), {type:'line', data:{labels:series.labels, datasets:[
+  {label:'Rate (mm/h)', data:series.rate, borderColor:'#4fa8ff', backgroundColor:'#4fa8ff22', fill:true, tension:.2, pointRadius:0, yAxisID:'y'},
+  {label:'Total (mm)', data:series.total, borderColor:'#1f5fa8', borderDash:[4,3], tension:.2, pointRadius:0, yAxisID:'y2'}]},
+  options:opt({}, null, 'mm/h', 'mm')});
+} catch(e){ console.warn('Charts disabled (Chart.js did not load):', e); }
+
+/* ---------- "last heard" badges + silent-sensor warning ---------- */
+setInterval(() => {
+  const live = port || simTimer;
+  const msgs = [];
+  [['speed','Wind speed'],['wind','Wind direction'],['rain','Rain']].forEach(([k, name]) => {
+    const el = $('age-' + k);
+    if (lastSeen[k]){
+      const s = Math.round((Date.now() - lastSeen[k]) / 1000);
+      el.textContent = s + 's ago';
+      el.className = 'age ' + (s < 15 ? 'ok' : 'stale');
+      if (live && s >= 15) msgs.push(`${name}: nothing received for ${s}s`);
+    } else {
+      el.textContent = 'no data'; el.className = 'age none';
+      if (live && Date.now() - connectedAt > 15000) msgs.push(`${name}: no [${k}] line received since connecting. Check that the sketch calls the module and prints it.`);
+    }
+  });
+  $('warn').innerHTML = msgs.join('<br>'); $('warn').classList.toggle('show', msgs.length > 0);
+}, 1000);
+
+/* ---------- connection ---------- */
+function setStatus(mode, text){ $('status').className = 'status ' + mode; $('statusText').textContent = text; }
+function handleLine(line){
+  if (paused) return;
+  addTerm(line, 't-' + classify(line));
+  parseLine(line);
+}
+async function closePort(){
+  keepReading = false;
+  try { if (reader) await reader.cancel(); } catch(e){}
+  try { if (port) await port.close(); } catch(e){}
+  port = null; reader = null; $('btnUsb').textContent = 'Connect via USB';
+}
+function stopSim(){ if (simTimer){ clearInterval(simTimer); simTimer = null; $('btnSim').textContent = 'Simulate'; } }
+
+$('btnUsb').onclick = async () => {
+  $('term').scrollIntoView({behavior:'smooth', block:'center'});
+  setStatus('', 'opening port picker…');
+  addTerm('Connect clicked. Browser: ' + navigator.userAgent.replace(/.*(Chrome|Edg|Firefox|Safari)\/?/, '$1'), 't-sys');
+  if (port){ await closePort(); setStatus('', 'disconnected'); addTerm('disconnected', 't-sys'); return; }
+  stopSim();
+  if (!('serial' in navigator)){
+    addTerm(window.isSecureContext
+      ? 'Web Serial is not supported here. Use desktop Chrome or Edge.'
+      : 'Web Serial needs a secure context. Serve this file: run "python3 -m http.server 8000" in its folder and open http://localhost:8000/weather-serial-dashboard.html', 't-err');
+    setStatus('', 'Web Serial unavailable'); return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    const baud = parseInt($('baud').value, 10);
+    await port.open({baudRate: baud});
+    connectedAt = Date.now();
+    setStatus('live', 'USB serial @ ' + baud);
+    $('btnUsb').textContent = 'Disconnect';
+    addTerm(`port opened at ${baud} baud`, 't-sys');
+    keepReading = true; readLoop();
+  } catch(e){
+    addTerm(e.name + ': ' + e.message, 't-err'); setStatus('', 'connect failed'); port = null;
+  }
+};
+
+async function readLoop(){
+  const dec = new TextDecoderStream();
+  port.readable.pipeTo(dec.writable).catch(()=>{});
+  reader = dec.readable.getReader();
+  let buf = '';
+  try {
+    while (keepReading){
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0, i).replace(/\r$/, ''); buf = buf.slice(i + 1);
+        if (line.trim()) handleLine(line);
+      }
+    }
+  } catch(e){ if (keepReading) addTerm(e.message, 't-err'); }
+  finally { try { reader.releaseLock(); } catch(e){} }
+}
+
+/* ---------- simulator (same line formats the sketch prints) ---------- */
+$('btnSim').onclick = async () => {
+  if (simTimer){ stopSim(); setStatus('', 'disconnected'); return; }
+  await closePort(); connectedAt = Date.now();
+  setStatus('sim', 'simulated data'); $('btnSim').textContent = 'Stop simulation';
+  let dir = 200, spins = 0, total = 0, tips = 0, tick = 0;
+  simTimer = setInterval(() => {
+    tick++;
+    dir = (dir + Math.random()*30 - 15 + 360) % 360;
+    if (tick % 2 === 0){
+      const kmh = Math.max(0, 8 + Math.sin(Date.now()/4000)*6 + Math.random()*3);
+      const rps = kmh / 3.6 / (2*Math.PI*0.09), rot = rps*2; spins += Math.floor(rot);
+      handleLine(`[speed] Pulses: ${Math.round(rot)} | Spins: ${rot.toFixed(2)} | RPM: ${(rps*60).toFixed(2)} | Speed: ${kmh.toFixed(2)} km/h | Total Spins: ${spins}`);
+    }
+    const raw = Math.round(dir/360*4096);
+    handleLine(`[wind] raw=${raw} deg=${dir.toFixed(1)} dir=${COMPASS[Math.round(dir/22.5)%16]}`);
+    if (tick % 5 === 0){
+      const rate = Math.max(0, Math.random()*6 - 2); total += rate/720; if (rate > 0) tips++;
+      handleLine(`[rain] rate:${rate.toFixed(2).padStart(6)} mm/h  today:${total.toFixed(2).padStart(7)} mm  week:${(total*3).toFixed(2).padStart(8)} mm  month:${(total*8).toFixed(2).padStart(8)} mm  total:${total.toFixed(2).padStart(8)} mm  tips:${String(tips).padStart(6)}  ${rate>0?'RAINING':'dry'}`);
+    }
+  }, 1000);
+};
+</script>
+</body>
+</html>
