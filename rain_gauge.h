@@ -2,7 +2,8 @@
 //
 // Driver for Hall Effect Tipping Bucket Rain Gauge on ESP-12E (ESP8266).
 // Tracks cumulative rain, last hour, today (24h), this week (7d), this month (30d),
-// and current rain rate in millimeters with flash persistence (LittleFS).
+// and current rain rate in millimeters. All data is kept in RAM only and starts
+// from zero on every reset.
 //
 
 #ifndef RAIN_GAUGE_H
@@ -28,11 +29,13 @@ class RainGauge
 public:
     RainGauge();
 
-    // Initializes pin, interrupt handler, and restores historical data from LittleFS
+    // Initializes pin and interrupt handler, and starts all counters from zero.
+    // Also deletes any history file an older version left on the flash.
     bool begin(int pin = RAIN_SENSOR_PIN, float mmPerTip = RAIN_MM_PER_TIP);
 
-    // Periodic housekeeping: processes new tips, rolls hourly/daily history buffers,
-    // and saves data to flash periodically. Call regularly in loop().
+    // Periodic housekeeping: turns captured pin edges into counted tips, rolls the
+    // minute/hourly/daily history buffers, and prints a reading when a tip is counted.
+    // Call regularly in loop().
     void update();
 
     // Returns the latest computed readings matching the reference English dashboard
@@ -50,21 +53,32 @@ public:
     // Returns historical rain records as JSON for Web UI / API
     String getHistoryJson();
 
-    // Reset counters and clear saved history
+    // Reset counters and clear history
     void clearHistory();
 
-    // Save current history to flash storage immediately
-    void forceSave();
-
-    // Interrupt service routine callback
-    void IRAM_ATTR onBucketTip();
+    // Interrupt service routine callback: only records the edge (time + level)
+    void IRAM_ATTR onPinEdge();
 
 private:
+    enum
+    {
+        EDGE_QUEUE_SIZE = 32, // must be a power of two
+        EDGE_QUEUE_MASK = EDGE_QUEUE_SIZE - 1
+    };
+
     int _pin;
     float _mmPerTip;
-    volatile uint32_t _rawTips;
-    volatile unsigned long _lastTipTime;
-    int _lastPinState;
+
+    // Pin edges captured by the ISR, consumed by update()
+    volatile unsigned long _edgeTime[EDGE_QUEUE_SIZE];
+    volatile uint8_t _edgeLevel[EDGE_QUEUE_SIZE];
+    volatile uint8_t _edgeHead;
+    volatile uint8_t _edgeTail;
+    volatile uint16_t _edgesDropped;
+
+    int _lastSeenLevel;
+    unsigned long _lastEdgeTime;
+    bool _haveEdge;
     unsigned long _lastProcessedTipTime;
     unsigned long _lastTipIntervalMs;
 
@@ -85,14 +99,11 @@ private:
     uint8_t _currentDayIndex;
     unsigned long _lastDayTick;
 
-    unsigned long _lastFlashSaveTime;
-    bool _historyDirty;
-
+    bool handleEdge(unsigned long t, int level, bool polled);
+    void removeLegacyStorage();
     void shiftMinute();
     void shiftHour();
     void shiftDay();
-    void loadFromStorage();
-    void saveToStorage();
 };
 
 extern RainGauge rainSensor;

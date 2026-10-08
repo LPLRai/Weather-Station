@@ -1,29 +1,32 @@
 // rain_gauge.cpp
 //
-// Implementation of RainGauge class with debouncing, rolling time-window
-// accumulators, LittleFS persistence, and diagnostic outputs.
+// Implementation of RainGauge class with edge capture, debouncing, rolling
+// time-window accumulators (RAM only), and diagnostic outputs.
 //
 
 #include "rain_gauge.h"
-
-#if RAIN_ENABLE_STORAGE
 #include <LittleFS.h>
-#endif
 
 RainGauge rainSensor;
+
+// File an older version used to keep history on flash.
+static const char *RAIN_LEGACY_FILE = "/rain_data.bin";
 
 // Global ISR router for ESP8266
 static void IRAM_ATTR globalRainISR()
 {
-    rainSensor.onBucketTip();
+    rainSensor.onPinEdge();
 }
 
 RainGauge::RainGauge()
     : _pin(RAIN_SENSOR_PIN),
       _mmPerTip(RAIN_MM_PER_TIP),
-      _rawTips(0),
-      _lastTipTime(0),
-      _lastPinState(HIGH),
+      _edgeHead(0),
+      _edgeTail(0),
+      _edgesDropped(0),
+      _lastSeenLevel(HIGH),
+      _lastEdgeTime(0),
+      _haveEdge(false),
       _lastProcessedTipTime(0),
       _lastTipIntervalMs(0),
       _lifetimeTips(0),
@@ -32,24 +35,28 @@ RainGauge::RainGauge()
       _currentHourIndex(0),
       _lastHourTick(0),
       _currentDayIndex(0),
-      _lastDayTick(0),
-      _lastFlashSaveTime(0),
-      _historyDirty(false)
+      _lastDayTick(0)
 {
     memset(_minuteTips, 0, sizeof(_minuteTips));
     memset(_hourlyRainMm, 0, sizeof(_hourlyRainMm));
     memset(_dailyRainMm, 0, sizeof(_dailyRainMm));
 }
 
-void IRAM_ATTR RainGauge::onBucketTip()
+// ISR: only record when the pin changed and what level it has now. All the
+// decisions (debounce, counting) happen in update(), using these timestamps,
+// so a slow loop() iteration can never change the result.
+void IRAM_ATTR RainGauge::onPinEdge()
 {
-    unsigned long now = millis();
-    // Hardware/magnet debounce check in ISR
-    if (now - _lastTipTime >= RAIN_DEBOUNCE_MS)
+    uint8_t head = _edgeHead;
+    uint8_t next = (head + 1) & EDGE_QUEUE_MASK;
+    if (next == _edgeTail)
     {
-        _rawTips++;
-        _lastTipTime = now;
+        _edgesDropped++;
+        return;
     }
+    _edgeTime[head] = millis();
+    _edgeLevel[head] = digitalRead(_pin) ? 1 : 0;
+    _edgeHead = next;
 }
 
 bool RainGauge::begin(int pin, float mmPerTip)
@@ -57,34 +64,101 @@ bool RainGauge::begin(int pin, float mmPerTip)
     _pin = pin;
     _mmPerTip = mmPerTip;
 
+    // Everything is kept in RAM; make sure no old saved totals can come back.
+    removeLegacyStorage();
+
     pinMode(_pin, INPUT_PULLUP);
-    _lastPinState = digitalRead(_pin);
-    attachInterrupt(digitalPinToInterrupt(_pin), globalRainISR, CHANGE);
+    _lastSeenLevel = digitalRead(_pin);
 
     unsigned long now = millis();
     _lastMinuteTick = now;
     _lastHourTick = now;
     _lastDayTick = now;
-    _lastFlashSaveTime = now;
-    // _lastTipTime defaults to 0 from the constructor, which is ambiguous
-    // with a genuine early millis() reading right after boot - seeding it here
-    // guarantees the first real tip is never spuriously rejected.
-    _lastTipTime = now - RAIN_DEBOUNCE_MS;
 
-#if RAIN_ENABLE_STORAGE
-    if (LittleFS.begin())
+    noInterrupts();
+    _edgeHead = 0;
+    _edgeTail = 0;
+    _edgesDropped = 0;
+    interrupts();
+    _haveEdge = false;
+    attachInterrupt(digitalPinToInterrupt(_pin), globalRainISR, CHANGE);
+
+    // Report the starting state (all zero) right away.
+    printCompact(Serial);
+
+    return true;
+}
+
+void RainGauge::removeLegacyStorage()
+{
+    // Never format or create a filesystem just to look for the old file.
+    LittleFSConfig cfg;
+    cfg.setAutoFormat(false);
+    LittleFS.setConfig(cfg);
+
+    if (!LittleFS.begin())
     {
-        loadFromStorage();
+        return;
+    }
+
+    if (LittleFS.exists(RAIN_LEGACY_FILE))
+    {
+        if (LittleFS.remove(RAIN_LEGACY_FILE))
+        {
+            Serial.println(F("[rain] Removed old saved rain history from flash."));
+        }
+        else
+        {
+            Serial.println(F("[rain] Could not remove old saved rain history from flash."));
+        }
+    }
+    LittleFS.end();
+}
+
+// Decides whether one pin edge is a new bucket tip. Edges within
+// RAIN_DEBOUNCE_MS of the previous edge belong to the same tip.
+bool RainGauge::handleEdge(unsigned long t, int level, bool polled)
+{
+    bool newTip = true;
+    bool firstEdge = !_haveEdge;
+    long gap = 0;
+
+    if (_haveEdge)
+    {
+        gap = (long)(t - _lastEdgeTime);
+        if (gap < 0)
+            gap = 0; // edge stamped slightly before one already processed
+        newTip = (unsigned long)gap >= RAIN_DEBOUNCE_MS;
+    }
+
+    if (!_haveEdge || (long)(t - _lastEdgeTime) > 0)
+    {
+        _lastEdgeTime = t;
+    }
+    _haveEdge = true;
+    _lastSeenLevel = level;
+
+#if RAIN_DEBUG_EDGES
+    Serial.print(F("[rain] edge: pin "));
+    Serial.print(level ? F("HIGH") : F("LOW "));
+    if (firstEdge)
+    {
+        Serial.print(F(" (first edge since boot)"));
     }
     else
     {
-        Serial.println(F("[rain] LittleFS mount failed. Formatting storage..."));
-        LittleFS.format();
-        LittleFS.begin();
+        Serial.print(F(" (+"));
+        Serial.print((unsigned long)gap);
+        Serial.print(F(" ms)"));
     }
+    if (polled)
+    {
+        Serial.print(F(" [found by polling]"));
+    }
+    Serial.println(newTip ? F(" -> TIP counted") : F(" -> ignored, same tip"));
 #endif
 
-    return true;
+    return newTip;
 }
 
 void RainGauge::shiftMinute()
@@ -108,32 +182,50 @@ void RainGauge::shiftDay()
 void RainGauge::update()
 {
     unsigned long now = millis();
+    uint32_t newTips = 0;
 
-    // Secondary fallback: check pin state change to catch tips even if
-    // an interrupt edge was missed or suppressed by hardware resting state.
-    int currentPinState = digitalRead(_pin);
-    if (currentPinState != _lastPinState)
+    // Turn the edges captured by the ISR into tips
+    while (_edgeTail != _edgeHead)
     {
-        _lastPinState = currentPinState;
-        if (now - _lastTipTime >= RAIN_DEBOUNCE_MS)
+        uint8_t i = _edgeTail;
+        unsigned long t = _edgeTime[i];
+        int level = _edgeLevel[i];
+        _edgeTail = (i + 1) & EDGE_QUEUE_MASK;
+        if (handleEdge(t, level, false))
         {
-            _rawTips++;
-            _lastTipTime = now;
+            newTips++;
         }
     }
 
-    // Atomically grab tips count from ISR / polling
-    noInterrupts();
-    uint32_t currentRaw = _rawTips;
-    _rawTips = 0;
-    interrupts();
-
-    if (currentRaw > 0)
+    if (_edgesDropped > 0)
     {
-        _lifetimeTips += currentRaw;
-        _minuteTips[_currentMinuteIndex] += currentRaw;
+        noInterrupts();
+        uint16_t dropped = _edgesDropped;
+        _edgesDropped = 0;
+        interrupts();
+        Serial.print(F("[rain] WARNING: "));
+        Serial.print(dropped);
+        Serial.println(F(" pin edges lost (queue full), the signal is extremely noisy."));
+    }
 
-        float rainMm = currentRaw * _mmPerTip;
+    // Secondary fallback: if the pin level differs from the last edge seen and no
+    // interrupt edge is waiting, an edge was missed. Feed it through the same logic,
+    // so it can never be counted twice for the same tip.
+    int currentPinState = digitalRead(_pin);
+    if (currentPinState != _lastSeenLevel && _edgeTail == _edgeHead)
+    {
+        if (handleEdge(millis(), currentPinState, true))
+        {
+            newTips++;
+        }
+    }
+
+    if (newTips > 0)
+    {
+        _lifetimeTips += newTips;
+        _minuteTips[_currentMinuteIndex] += newTips;
+
+        float rainMm = newTips * _mmPerTip;
         _hourlyRainMm[_currentHourIndex] += rainMm;
         _dailyRainMm[_currentDayIndex] += rainMm;
 
@@ -142,7 +234,6 @@ void RainGauge::update()
             _lastTipIntervalMs = now - _lastProcessedTipTime;
         }
         _lastProcessedTipTime = now;
-        _historyDirty = true;
     }
 
     // Handle minute tick (60,000 ms) safely without WDT starvation
@@ -169,7 +260,6 @@ void RainGauge::update()
             shiftHour();
         }
         _lastHourTick = now;
-        _historyDirty = true;
     }
 
     // Handle day tick (86,400,000 ms) safely
@@ -183,16 +273,13 @@ void RainGauge::update()
             shiftDay();
         }
         _lastDayTick = now;
-        _historyDirty = true;
     }
 
-#if RAIN_ENABLE_STORAGE
-    // Commit to flash periodically if modified
-    if (_historyDirty && (now - _lastFlashSaveTime >= RAIN_SAVE_INTERVAL_MS))
+#if RAIN_PRINT_ON_TIP
+    // Live update: report the new totals as soon as a tip is counted.
+    if (newTips > 0)
     {
-        saveToStorage();
-        _lastFlashSaveTime = now;
-        _historyDirty = false;
+        printCompact(Serial);
     }
 #endif
 }
@@ -335,91 +422,11 @@ String RainGauge::getHistoryJson()
     return json;
 }
 
-#if RAIN_ENABLE_STORAGE
-
-struct PersistentRainData
-{
-    uint32_t magic;
-    uint32_t lifetimeTips;
-    float hourlyRainMm[RAIN_HOURLY_HISTORY_HOURS];
-    float dailyRainMm[RAIN_DAILY_HISTORY_DAYS];
-    uint8_t currentHourIndex;
-    uint8_t currentDayIndex;
-};
-
-static const uint32_t RAIN_MAGIC = 0x5241494E; // "RAIN"
-
-void RainGauge::loadFromStorage()
-{
-    if (!LittleFS.exists("/rain_data.bin"))
-    {
-        Serial.println(F("[rain] No existing history file on flash. Starting fresh."));
-        return;
-    }
-
-    File f = LittleFS.open("/rain_data.bin", "r");
-    if (!f)
-    {
-        Serial.println(F("[rain] Failed to open history file for reading."));
-        return;
-    }
-
-    PersistentRainData data;
-    if (f.read((uint8_t *)&data, sizeof(data)) == sizeof(data))
-    {
-        if (data.magic == RAIN_MAGIC)
-        {
-            _lifetimeTips = data.lifetimeTips;
-            _currentHourIndex = data.currentHourIndex % RAIN_HOURLY_HISTORY_HOURS;
-            _currentDayIndex = data.currentDayIndex % RAIN_DAILY_HISTORY_DAYS;
-            memcpy(_hourlyRainMm, data.hourlyRainMm, sizeof(_hourlyRainMm));
-            memcpy(_dailyRainMm, data.dailyRainMm, sizeof(_dailyRainMm));
-            Serial.println(F("[rain] Loaded saved history from flash storage successfully."));
-        }
-    }
-    f.close();
-}
-
-void RainGauge::saveToStorage()
-{
-    File f = LittleFS.open("/rain_data.bin", "w");
-    if (!f)
-    {
-        Serial.println(F("[rain] Error writing history to flash."));
-        return;
-    }
-
-    PersistentRainData data;
-    data.magic = RAIN_MAGIC;
-    data.lifetimeTips = _lifetimeTips;
-    data.currentHourIndex = _currentHourIndex;
-    data.currentDayIndex = _currentDayIndex;
-    memcpy(data.hourlyRainMm, _hourlyRainMm, sizeof(_hourlyRainMm));
-    memcpy(data.dailyRainMm, _dailyRainMm, sizeof(_dailyRainMm));
-
-    f.write((const uint8_t *)&data, sizeof(data));
-    f.close();
-    Serial.println(F("[rain] History successfully saved to flash."));
-}
-
-#else
-
-void RainGauge::loadFromStorage() {}
-void RainGauge::saveToStorage() {}
-
-#endif
-
-void RainGauge::forceSave()
-{
-    saveToStorage();
-}
-
 void RainGauge::clearHistory()
 {
     _lifetimeTips = 0;
     memset(_minuteTips, 0, sizeof(_minuteTips));
     memset(_hourlyRainMm, 0, sizeof(_hourlyRainMm));
     memset(_dailyRainMm, 0, sizeof(_dailyRainMm));
-    saveToStorage();
     Serial.println(F("[rain] Rain history cleared."));
 }
