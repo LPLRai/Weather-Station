@@ -10,20 +10,15 @@
 
 // =====================================================================
 // Pin Mapping - ESP-12E / NodeMCU
-// Hall Sensor / Reed Switch Wiring: VCC -> 3V3, GND -> GND, OUT / Signal -> D3 or D5
+// Hall Sensor / Reed Switch Wiring: VCC -> 3V3, GND -> GND, OUT / Signal -> D7 (GPIO13)
 // =====================================================================
-// Note: D3 = GPIO0 is a BOOT-STRAPPING pin. If the sensor pulls D3 LOW on boot,
-// the ESP enters flash mode. D5 (GPIO14) is boot-safe and strongly recommended.
-#ifndef D3
-#define D3 0 // GPIO0 on ESP8266 / NodeMCU
-#endif
-#ifndef D5
-#define D5 14 // GPIO14 on ESP8266 / NodeMCU
+#ifndef D7
+#define D7 13 // GPIO13 on ESP8266 / NodeMCU (Boot-safe & Interrupt capable)
 #endif
 
-// Change to D5 if wired to D5 (GPIO14), or keep D3 if wired to D3 (GPIO0)
+// Rain gauge tipper pin: D7 (GPIO13)
 #ifndef RAIN_SENSOR_PIN
-#define RAIN_SENSOR_PIN D3
+#define RAIN_SENSOR_PIN D7
 #endif
 
 // =====================================================================
@@ -71,16 +66,5 @@
 
 // Number of daily records to keep in memory (30 days)
 #define RAIN_DAILY_HISTORY_DAYS 30
-
-// =====================================================================
-// WiFi / Web Dashboard
-// =====================================================================
-#define ENABLE_WEB_DASHBOARD true
-#define WIFI_SSID "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-
-// If WiFi cannot connect, ESP starts an Access Point with this name:
-#define AP_SSID "WeatherStation-AP"
-#define AP_PASSWORD "" // Leave empty for open AP
 
 #endif // RAIN_GAUGE_CONFIG_H

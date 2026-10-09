@@ -15,6 +15,12 @@ unsigned long lastSampleTimeSpeed = 0;
 unsigned long totalPulses = 0;   // lifetime pulse count
 unsigned long totalSpins = 0;    // lifetime full rotations
 
+static WindSpeedReading latestSpeedReading = {0.0f, 0.0f, 0.0f, 0, 0, 0};
+
+WindSpeedReading getWindSpeedReading() {
+  return latestSpeedReading;
+}
+
 // ISR: just increment counter, keep it fast
 void IRAM_ATTR handlePulse() {
   pulseCount++;
@@ -51,6 +57,14 @@ void readWindSpeed() {
     // Update lifetime counters
     totalPulses += pulses;
     totalSpins += (unsigned long)rotations;
+
+    // Update latest reading struct
+    latestSpeedReading.speedKMH = speedKMH;
+    latestSpeedReading.rpm = rpm;
+    latestSpeedReading.rotations = rotations;
+    latestSpeedReading.pulsesInWindow = pulses;
+    latestSpeedReading.totalSpins = totalSpins;
+    latestSpeedReading.totalPulses = totalPulses;
 
 #if WIND_SPEED_PRINT_ENABLED
     Serial.print(F("[speed] Pulses: "));

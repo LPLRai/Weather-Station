@@ -1,0 +1,2469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Station — Cloud &amp; History Dashboard</title>
+<!-- Firebase JS SDK (Compat v9) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<!-- Font Awesome Icons -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+:root {
+  --bg-app: #0b0f17;
+  --bg-panel: #111827;
+  --bg-card: #161f30;
+  --bg-card-hover: #1d283d;
+  --border: #243046;
+  --border-focus: #3b82f6;
+
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+
+  --wind: #10b981;
+  --wind-bg: rgba(16, 185, 129, 0.12);
+  --dir: #06b6d4;
+  --dir-bg: rgba(6, 182, 212, 0.12);
+  --rain: #3b82f6;
+  --rain-bg: rgba(59, 130, 246, 0.12);
+  --gust: #f59e0b;
+  --gust-bg: rgba(245, 158, 11, 0.12);
+  --err: #ef4444;
+  --accent: #6366f1;
+
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --radius-lg: 10px;
+  --radius-md: 6px;
+  --shadow-panel: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg-app); color: var(--text-main); font-family: var(--font-sans); }
+body { display: flex; flex-direction: column; overflow-x: hidden; }
+
+/* Header */
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.2px;
+}
+.brand i { color: var(--dir); font-size: 18px; }
+.brand .sub { color: var(--text-muted); font-weight: 400; font-size: 13px; }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px var(--font-mono);
+  background: var(--bg-card);
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+.led { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; }
+.status-pill.online .led { background: var(--wind); box-shadow: 0 0 8px var(--wind); }
+.status-pill.sim .led { background: var(--gust); box-shadow: 0 0 8px var(--gust); }
+.status-pill.offline .led { background: var(--err); }
+
+.header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+button {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+button:hover { background: var(--bg-card-hover); border-color: #4b5563; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #4f46e5; }
+button.active { background: var(--bg-card-hover); border-color: var(--dir); color: var(--dir); }
+
+/* Navigation Tabs */
+.tabs-nav {
+  display: flex;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  gap: 6px;
+  overflow-x: auto;
+}
+.tab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--text-muted);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text-main); background: transparent; border-bottom-color: #4b5563; }
+.tab-btn.active { color: var(--dir); border-bottom-color: var(--dir); }
+
+/* Main Container */
+main {
+  flex: 1;
+  max-width: 1480px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+}
+
+.tab-pane { display: none; }
+.tab-pane.active { display: block; animation: fadeIn 0.2s ease-in-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Section Header */
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title i { color: var(--dir); }
+
+/* Grids */
+.grid { display: grid; gap: 14px; margin-bottom: 16px; }
+.grid-big-stats { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.grid-sub-stats { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.grid-two { grid-template-columns: 1fr 1fr; }
+.grid-main { grid-template-columns: 2fr 1fr; }
+@media (max-width: 960px) { .grid-two, .grid-main { grid-template-columns: 1fr; } }
+
+/* Panels */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-panel);
+  position: relative;
+}
+
+/* Big Grafana Stat Cards */
+.stat-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--shadow-panel);
+}
+.stat-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+.stat-body {
+  margin: 10px 0 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.stat-num {
+  font: 700 38px/1 var(--font-mono);
+  letter-spacing: -1px;
+}
+.stat-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.stat-sub {
+  font: 11.5px var(--font-mono);
+  color: var(--text-dim);
+  min-height: 16px;
+}
+
+.c-wind { color: var(--wind); }
+.c-dir { color: var(--dir); }
+.c-rain { color: var(--rain); }
+.c-gust { color: var(--gust); }
+
+/* Compass Widget */
+.compass-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 12px 0;
+}
+.compass-svg { width: 140px; height: 140px; }
+
+/* Chart Containers */
+.chart-box { position: relative; height: 260px; width: 100%; margin-top: 10px; }
+.chart-box-lg { height: 340px; }
+
+/* Grafana 1:1 Layout Styles */
+.grafana-row-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.grafana-row-header i { color: var(--text-muted); font-size: 11px; }
+
+.grafana-summary-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1.5fr 1.2fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) {
+  .grafana-summary-grid { grid-template-columns: 1fr; }
+}
+
+.summary-giant-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+.giant-stat-body {
+  display: flex;
+  align-items: baseline;
+  margin-top: 12px;
+}
+.giant-num {
+  font: 800 68px/1 var(--font-mono);
+  letter-spacing: -2px;
+}
+.giant-num.yellow { color: #f59e0b; }
+.giant-num.green { color: #84cc16; }
+.giant-unit {
+  font: 700 24px var(--font-mono);
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+.giant-cardinal {
+  font: 700 32px var(--font-sans);
+  color: #84cc16;
+  margin-left: 12px;
+}
+
+.summary-center-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.compact-stat { padding: 10px 14px; }
+.compact-val {
+  font: 700 24px/1.2 var(--font-mono);
+  margin-top: 4px;
+}
+.compact-val .unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.wind-rose-flex {
+  display: flex;
+  align-items: center;
+  height: 250px;
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+}
+.wind-rose-canvas-wrap {
+  flex: 1;
+  height: 250px;
+  min-width: 160px;
+  position: relative;
+}
+.wind-rose-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+.wind-rose-legend-vert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.leg-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.leg-box { width: 14px; height: 12px; border-radius: 2px; display: inline-block; }
+
+/* History Controls */
+.history-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+}
+.date-nav { display: flex; align-items: center; gap: 8px; }
+input[type="date"], input[type="month"], select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  outline: none;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+
+/* Tables */
+.table-wrap {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+}
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; text-align: left; }
+thead { background: var(--bg-card); position: sticky; top: 0; z-index: 10; }
+th, td { padding: 9px 14px; border-bottom: 1px solid var(--border); font-family: var(--font-mono); }
+th { color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+tr:hover td { background: var(--bg-card-hover); }
+
+/* Manual Entry Form */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.form-field { display: flex; flex-direction: column; gap: 6px; }
+.form-field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.form-field input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  outline: none;
+}
+.form-field input:focus { border-color: var(--border-focus); }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.badge-rain { background: var(--rain-bg); color: var(--rain); }
+.badge-wind { background: var(--wind-bg); color: var(--wind); }
+.badge-dry { background: #1f2937; color: var(--text-dim); }
+
+/* Terminal / Log */
+.terminal {
+  font: 12px/1.5 var(--font-mono);
+  background: #06090e;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  height: 280px;
+  overflow-y: auto;
+  color: #9ca3af;
+}
+.log-row { margin-bottom: 2px; }
+.log-row .ts { color: #4b5563; margin-right: 6px; }
+.log-row .tag-wind { color: var(--wind); }
+.log-row .tag-dir { color: var(--dir); }
+.log-row .tag-rain { color: var(--rain); }
+.log-row .tag-fb { color: #fbbf24; }
+
+/* Modal (High Z-Index & Clean Overlay) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  padding: 20px;
+}
+.modal-overlay.open { display: flex !important; }
+.modal-box {
+  background: var(--bg-panel);
+  border: 1px solid #374151;
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 520px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+}
+.modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.modal-body { display: flex; flex-direction: column; gap: 14px; }
+.modal-body label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.modal-body input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* Owner Admin Protection */
+.admin-only {
+  display: none !important;
+}
+body.is-admin .admin-only {
+  display: inline-flex !important;
+}
+body.is-admin div.admin-only {
+  display: block !important;
+}
+#btnAdminAuth.active {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: #10b981;
+  color: #10b981;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="brand">
+    <i class="fa-solid fa-cloud-bolt"></i>
+    <span>Weather Station <span class="sub">/ Cloud &amp; History</span></span>
+  </div>
+
+  <div class="status-pill online" id="connStatus">
+    <span class="led"></span>
+    <span id="connStatusText">Firebase Live</span>
+  </div>
+
+  <div class="header-actions">
+    <button id="btnAdminAuth" onclick="handleAdminAuthClick()"><i class="fa-solid fa-lock" id="iconAdmin"></i> <span id="adminBtnLabel">Admin</span></button>
+    <button id="btnSettings" onclick="openConfigModal()"><i class="fa-solid fa-gear"></i> Config</button>
+    <button id="btnSim" onclick="toggleSim()"><i class="fa-solid fa-vial"></i> Demo Data</button>
+    <button class="primary" id="btnUsb"><i class="fa-brands fa-usb"></i> USB Serial</button>
+    <button id="btnClearData" class="admin-only" style="background:#dc2626;color:#ffffff;border-color:#b91c1c;" onclick="clearDashboardData()"><i class="fa-solid fa-trash-can"></i> Clear Data</button>
+  </div>
+</header>
+
+<!-- Navigation Tabs -->
+<div class="tabs-nav">
+  <button class="tab-btn active" data-tab="tab-live"><i class="fa-solid fa-gauge-high"></i> Live Telemetry</button>
+  <button class="tab-btn" data-tab="tab-day"><i class="fa-solid fa-calendar-day"></i> Day History</button>
+  <button class="tab-btn" data-tab="tab-week"><i class="fa-solid fa-calendar-week"></i> Week History</button>
+  <button class="tab-btn" data-tab="tab-month"><i class="fa-solid fa-calendar"></i> Month History</button>
+  <button class="tab-btn admin-only" id="tabBtnManual" data-tab="tab-manual"><i class="fa-solid fa-pen-to-square"></i> Input Custom Data</button>
+  <button class="tab-btn" data-tab="tab-logs"><i class="fa-solid fa-terminal"></i> Logs &amp; Diagnostics</button>
+</div>
+
+<main>
+  <!-- TAB 1: LIVE DASHBOARD -->
+  <div class="tab-pane active" id="tab-live">
+    <!-- Big Stat Cards (Grafana Style) -->
+    <div class="section-title"><i class="fa-solid fa-chart-simple"></i> Live Summary</div>
+    <div class="grid grid-big-stats">
+      <div class="stat-card">
+        <div class="stat-head"><span>Wind Speed</span> <i class="fa-solid fa-wind c-wind"></i></div>
+        <div class="stat-body"><span class="stat-num c-wind" id="v-speed">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub" id="s-speed">0.0 RPM | 0.0 km/h max</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-head"><span>Wind Direction</span> <i class="fa-solid fa-compass c-dir"></i></div>
+        <div class="stat-body">
+          <span class="stat-num c-dir" id="v-deg">0.0</span><span class="stat-unit">°</span>
+          <span id="v-cardinal" style="font-size:24px;font-weight:700;margin-left:4px;color:var(--dir)">N</span>
+        </div>
+        <div class="stat-sub" id="s-magnet">AS5600 Angle: --</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-head"><span>Rain Rate</span> <i class="fa-solid fa-droplet c-rain"></i></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="v-rate">0.0</span><span class="stat-unit">mm/h</span></div>
+        <div class="stat-sub" id="v-status"><span class="badge badge-dry">DRY</span></div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-head"><span>Rain Today (24h)</span> <i class="fa-solid fa-cloud-rain c-rain"></i></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="v-today">0.0</span><span class="stat-unit">mm</span></div>
+        <div class="stat-sub" id="s-hour">Last hour: 0.0 mm</div>
+      </div>
+    </div>
+
+    <!-- Secondary Metric Cards -->
+    <div class="grid grid-sub-stats">
+      <div class="panel">
+        <div class="stat-head"><span>Rotations (RPM)</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span class="c-wind" id="v-rpm">0.0</span> <span style="font-size:12px;color:var(--text-muted)">RPM</span></div>
+        <div class="stat-sub" id="s-spins">Total: 0 spins</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Week Rain (7d)</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span class="c-rain" id="v-week">0.0</span> <span style="font-size:12px;color:var(--text-muted)">mm</span></div>
+        <div class="stat-sub">7-Day accumulated</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Month Rain (30d)</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span class="c-rain" id="v-month">0.0</span> <span style="font-size:12px;color:var(--text-muted)">mm</span></div>
+        <div class="stat-sub" id="s-tips">Total: 0.0 mm | 0 tips</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Peak Wind Gust</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span class="c-gust" id="v-maxwind">0.0</span> <span style="font-size:12px;color:var(--text-muted)">km/h</span></div>
+        <div class="stat-sub">Recorded peak</div>
+      </div>
+    </div>
+
+    <!-- Live Wind Speed & Exact Grafana Wind Rose -->
+    <div class="grid grid-main">
+      <div class="panel">
+        <div class="stat-head"><span>Live Wind Speed Trend (Moving 2-Min Window)</span></div>
+        <div class="chart-box"><canvas id="chLiveWind"></canvas></div>
+      </div>
+
+      <div class="panel">
+        <div class="stat-head" style="justify-content:center;margin-bottom:8px;">
+          <span style="font-size:14px;font-weight:700;color:var(--text-main);">Wind Speed vs Wind Direction</span>
+        </div>
+        <div class="wind-rose-flex">
+          <div class="wind-rose-canvas-wrap">
+            <canvas id="cvGrafanaWindRose" style="width:100%;height:100%;display:block;"></canvas>
+          </div>
+          <div class="wind-rose-legend-vert">
+            <div class="leg-row"><span class="leg-box" style="background:#facc15"></span> 5 - 6 mph</div>
+            <div class="leg-row"><span class="leg-box" style="background:#a3e635"></span> 4 - 5 mph</div>
+            <div class="leg-row"><span class="leg-box" style="background:#4ade80"></span> 3 - 4 mph</div>
+            <div class="leg-row"><span class="leg-box" style="background:#2dd4bf"></span> 2 - 3 mph</div>
+            <div class="leg-row"><span class="leg-box" style="background:#38bdf8"></span> 1 - 2 mph</div>
+            <div class="leg-row"><span class="leg-box" style="background:#3b82f6"></span> 0 - 1 mph</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Rain Chart -->
+    <div class="panel">
+      <div class="stat-head"><span>Live Rain Rate &amp; Today's Precipitation Trend</span></div>
+      <div class="chart-box"><canvas id="chLiveRain"></canvas></div>
+    </div>
+  </div>
+
+  <!-- TAB 2: DAY HISTORY -->
+  <div class="tab-pane" id="tab-day">
+    <div class="history-bar">
+      <div class="date-nav">
+        <button onclick="shiftDay(-1)"><i class="fa-solid fa-chevron-left"></i></button>
+        <input type="date" id="dayPicker" onchange="loadDayHistory()">
+        <button onclick="shiftDay(1)"><i class="fa-solid fa-chevron-right"></i></button>
+        <button onclick="resetDayToday()">Today</button>
+      </div>
+      <div style="flex:1;"></div>
+      <button onclick="exportDayCsv()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+    </div>
+
+    <div class="grid grid-big-stats">
+      <div class="panel">
+        <div class="stat-head"><span>Day Total Rain</span></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="h-day-rain">0.0</span><span class="stat-unit">mm</span></div>
+        <div class="stat-sub" id="h-day-rain-sub">--</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Peak Wind Gust</span></div>
+        <div class="stat-body"><span class="stat-num c-gust" id="h-day-maxwind">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub">24-hour high</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Average Wind</span></div>
+        <div class="stat-body"><span class="stat-num c-wind" id="h-day-avgwind">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub">24-hour mean</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Prevailing Heading</span></div>
+        <div class="stat-body"><span class="stat-num c-dir" id="h-day-dir">--</span></div>
+        <div class="stat-sub">Dominant direction</div>
+      </div>
+    </div>
+
+    <div class="grid grid-two">
+      <div class="panel">
+        <div class="stat-head"><span>24-Hour Wind Speed &amp; Peak Gusts (km/h)</span></div>
+        <div class="chart-box"><canvas id="chDayWind"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>24-Hour Rainfall by Hour (mm)</span></div>
+        <div class="chart-box"><canvas id="chDayRain"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="stat-head"><span>Hourly Breakdown Table (00:00 - 23:00)</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Hour</th>
+              <th>Rainfall (mm)</th>
+              <th>Avg Wind (km/h)</th>
+              <th>Peak Gust (km/h)</th>
+              <th>Heading</th>
+              <th>Samples</th>
+            </tr>
+          </thead>
+          <tbody id="tbDayBody">
+            <tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Select a date to view data.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: WEEK HISTORY -->
+  <div class="tab-pane" id="tab-week">
+    <div class="history-bar">
+      <div class="date-nav">
+        <button onclick="shiftWeek(-7)"><i class="fa-solid fa-chevron-left"></i></button>
+        <span id="weekLabel" style="font-family:var(--font-mono);font-size:13px;font-weight:600;">Past 7 Days</span>
+        <button onclick="shiftWeek(7)"><i class="fa-solid fa-chevron-right"></i></button>
+        <button onclick="resetWeekCurrent()">Current Week</button>
+      </div>
+      <div style="flex:1;"></div>
+      <button onclick="exportWeekCsv()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+    </div>
+
+    <div class="grid grid-big-stats">
+      <div class="panel">
+        <div class="stat-head"><span>7-Day Total Rain</span></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="h-week-rain">0.0</span><span class="stat-unit">mm</span></div>
+        <div class="stat-sub" id="h-week-rain-sub">--</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Weekly Peak Gust</span></div>
+        <div class="stat-body"><span class="stat-num c-gust" id="h-week-maxwind">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub">Weekly high</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Wettest Day</span></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="h-week-wettest">--</span></div>
+        <div class="stat-sub" id="h-week-wettest-val">0.0 mm</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>7-Day Average Wind</span></div>
+        <div class="stat-body"><span class="stat-num c-wind" id="h-week-avgwind">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub">Mean velocity</div>
+      </div>
+    </div>
+
+    <div class="grid grid-two">
+      <div class="panel">
+        <div class="stat-head"><span>Daily Rainfall Comparison (mm)</span></div>
+        <div class="chart-box"><canvas id="chWeekRain"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Daily Wind Speed &amp; Gusts (km/h)</span></div>
+        <div class="chart-box"><canvas id="chWeekWind"></canvas></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="stat-head"><span>7-Day History Table</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date / Day</th>
+              <th>Rainfall (mm)</th>
+              <th>Avg Wind (km/h)</th>
+              <th>Max Gust (km/h)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tbWeekBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Loading week data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: MONTH HISTORY -->
+  <div class="tab-pane" id="tab-month">
+    <div class="history-bar">
+      <div class="date-nav">
+        <button onclick="shiftMonth(-1)"><i class="fa-solid fa-chevron-left"></i></button>
+        <input type="month" id="monthPicker" onchange="loadMonthHistory()">
+        <button onclick="shiftMonth(1)"><i class="fa-solid fa-chevron-right"></i></button>
+        <button onclick="resetMonthCurrent()">This Month</button>
+      </div>
+      <div style="flex:1;"></div>
+      <button onclick="exportMonthCsv()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+    </div>
+
+    <div class="grid grid-big-stats">
+      <div class="panel">
+        <div class="stat-head"><span>Monthly Rain Total</span></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="h-month-rain">0.0</span><span class="stat-unit">mm</span></div>
+        <div class="stat-sub" id="h-month-rain-sub">--</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Monthly Max Gust</span></div>
+        <div class="stat-body"><span class="stat-num c-gust" id="h-month-maxwind">0.0</span><span class="stat-unit">km/h</span></div>
+        <div class="stat-sub">Monthly peak</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Rainy Days</span></div>
+        <div class="stat-body"><span class="stat-num c-rain" id="h-month-raindays">0</span><span class="stat-unit">days</span></div>
+        <div class="stat-sub">Precipitation days</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Recorded Days</span></div>
+        <div class="stat-body"><span class="stat-num c-dir" id="h-month-daysrecorded">0</span></div>
+        <div class="stat-sub">Active logging days</div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="stat-head"><span>Daily Rain &amp; Cumulative Month Accumulation (mm)</span></div>
+      <div class="chart-box chart-box-lg"><canvas id="chMonth"></canvas></div>
+    </div>
+
+    <div class="panel">
+      <div class="stat-head"><span>Monthly Daily Records</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Rainfall (mm)</th>
+              <th>Avg Wind (km/h)</th>
+              <th>Max Gust (km/h)</th>
+              <th>Samples</th>
+            </tr>
+          </thead>
+          <tbody id="tbMonthBody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Loading monthly data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 5: MANUAL DATA INPUT -->
+  <div class="tab-pane admin-only" id="tab-manual">
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="stat-head"><span><i class="fa-solid fa-pen-to-square"></i> Manual Weather Data Injector</span></div>
+      <p style="font-size:13px;color:var(--text-muted);margin:8px 0 16px;">
+        Use this tool to input your own custom weather readings. You can push them live to Firebase Realtime Database or apply them directly to test the dashboard.
+      </p>
+
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Wind Speed (km/h)</label>
+          <input type="number" id="inSpeed" step="0.1" value="18.5">
+        </div>
+        <div class="form-field">
+          <label>Rotations (RPM)</label>
+          <input type="number" id="inRpm" step="0.1" value="68.0">
+        </div>
+        <div class="form-field">
+          <label>Wind Heading (Degrees 0-359°)</label>
+          <input type="number" id="inDeg" min="0" max="359" step="1" value="215">
+        </div>
+        <div class="form-field">
+          <label>Rain Rate (mm/h)</label>
+          <input type="number" id="inRate" step="0.1" value="3.4">
+        </div>
+        <div class="form-field">
+          <label>Today Rain (mm)</label>
+          <input type="number" id="inToday" step="0.1" value="6.8">
+        </div>
+        <div class="form-field">
+          <label>Week Rain (mm)</label>
+          <input type="number" id="inWeek" step="0.1" value="22.5">
+        </div>
+        <div class="form-field">
+          <label>Month Rain (mm)</label>
+          <input type="number" id="inMonth" step="0.1" value="48.2">
+        </div>
+        <div class="form-field">
+          <label>Lifetime Total Rain (mm)</label>
+          <input type="number" id="inTotal" step="0.1" value="135.0">
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="primary" onclick="pushManualLiveToFirebase()"><i class="fa-solid fa-cloud-arrow-up"></i> Push Live to Firebase</button>
+        <button onclick="injectTestHistory()"><i class="fa-solid fa-database"></i> Generate &amp; Save 24h History to Firebase</button>
+        <button onclick="applyManualToUI()"><i class="fa-solid fa-display"></i> Preview on UI Only</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 6: LOGS & DIAGNOSTICS -->
+  <div class="tab-pane" id="tab-logs">
+    <div class="grid grid-big-stats">
+      <div class="panel">
+        <div class="stat-head"><span>ESP8266 Uptime</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;" id="d-uptime">--</div>
+        <div class="stat-sub">Duration online</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Wi-Fi RSSI</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span id="d-rssi">--</span> <span style="font-size:12px;color:var(--text-muted)">dBm</span></div>
+        <div class="stat-sub">Signal strength</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Free Heap Memory</span></div>
+        <div style="font:700 24px/1.2 var(--font-mono);margin-top:6px;"><span id="d-heap">--</span> <span style="font-size:12px;color:var(--text-muted)">bytes</span></div>
+        <div class="stat-sub">RAM available</div>
+      </div>
+      <div class="panel">
+        <div class="stat-head"><span>Last Cloud Sync</span></div>
+        <div style="font:700 20px/1.2 var(--font-mono);margin-top:6px;" id="d-sync">--</div>
+        <div class="stat-sub" id="d-sync-age">--</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="stat-head" style="margin-bottom:10px;">
+        <span>Live System Log &amp; Event Stream</span>
+        <button onclick="clearLogs()" style="padding:2px 8px;font-size:11px;">Clear Log</button>
+      </div>
+      <div class="terminal" id="termLog">
+        <div class="log-row"><span class="ts">[SYS]</span> Dashboard loaded. Ready for Firebase streaming.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Config Modal -->
+<div class="modal-overlay" id="cfgModal">
+  <div class="modal-box">
+    <div class="modal-title"><i class="fa-solid fa-gear"></i> Firebase Database Settings</div>
+    <div class="modal-body">
+      <div>
+        <label>Firebase Realtime Database URL</label>
+        <input type="text" id="cfgDbUrl" value="https://weatherproject-864e1-default-rtdb.asia-southeast1.firebasedatabase.app">
+      </div>
+      <div>
+        <label>Project ID</label>
+        <input type="text" id="cfgProjId" value="weatherproject-864e1">
+      </div>
+      <div>
+        <label>Web API Key (Optional)</label>
+        <input type="text" id="cfgApiKey" placeholder="AIzaSy...">
+      </div>
+      <div>
+        <label><i class="fa-solid fa-key"></i> Owner Admin PIN (Used to unlock custom input &amp; clear data)</label>
+        <input type="password" id="cfgAdminPin" placeholder="Enter PIN">
+      </div>
+
+      <div style="margin-top:14px;border-top:1px solid #374151;padding-top:14px;">
+        <label style="color:var(--err);font-weight:700;"><i class="fa-solid fa-triangle-exclamation"></i> Danger Zone</label>
+        <button type="button" onclick="clearFirebaseCloudHistory()" style="background:#450a0a;border-color:#7f1d1d;color:#fca5a5;width:100%;justify-content:center;margin-top:6px;">
+          <i class="fa-solid fa-trash-can"></i> Clear All Firebase History Data
+        </button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button onclick="closeConfigModal()">Cancel</button>
+      <button class="primary" onclick="saveConfigModal()">Save &amp; Connect</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   State & Configuration
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+
+let currentTab = 'tab-live';
+let isSimulating = false;
+let simInterval = null;
+let usbPort = null, usbReader = null;
+let lastSyncTime = 0;
+let peakGustRecorded = 0;
+
+let fbConfig = JSON.parse(localStorage.getItem('ws_fb_config') || '{}');
+if (!fbConfig.dbUrl || !fbConfig.dbUrl.includes('asia-southeast1')) {
+  fbConfig = {
+    dbUrl: "https://weatherproject-864e1-default-rtdb.asia-southeast1.firebasedatabase.app",
+    apiKey: "",
+    projectId: "weatherproject-864e1"
+  };
+  localStorage.setItem('ws_fb_config', JSON.stringify(fbConfig));
+}
+
+let fbApp = null, fbDb = null;
+let chLiveWind, chLiveRain, chWindRose, chDayWind, chDayRain, chWeekRain, chWeekWind, chMonth;
+
+const liveWindPts = { labels: [], speed: [], rpm: [] };
+const liveRainPts = { labels: [], rate: [], total: [] };
+const windRoseSectorData = [0, 0, 0, 0, 0, 0, 0, 0]; // N, NE, E, SE, S, SW, W, NW
+
+/* =====================================================================
+/* =====================================================================
+   Owner Admin Authentication
+   ===================================================================== */
+function getAdminPin() {
+  const pin = localStorage.getItem('ws_admin_pin');
+  if (!pin || pin === '1234') {
+    localStorage.setItem('ws_admin_pin', '6969');
+    return '6969';
+  }
+  return pin;
+}
+
+function checkAdminAuth() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlAdminParam = urlParams.get('admin');
+
+  if (urlAdminParam !== null) {
+    if (urlAdminParam === getAdminPin() || urlAdminParam === 'true') {
+      localStorage.setItem('ws_is_admin', 'true');
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+      logMsg('Admin Mode unlocked via secret link.', 'SYS');
+    } else {
+      alert('Invalid admin key in URL.');
+    }
+  }
+
+  const isAdmin = localStorage.getItem('ws_is_admin') === 'true';
+  applyAdminState(isAdmin);
+}
+
+function applyAdminState(isAdmin) {
+  if (isAdmin) {
+    document.body.classList.add('is-admin');
+    if ($('btnAdminAuth')) {
+      $('btnAdminAuth').classList.add('active');
+      $('iconAdmin').className = 'fa-solid fa-lock-open';
+      $('adminBtnLabel').textContent = 'Admin (Exit)';
+    }
+  } else {
+    document.body.classList.remove('is-admin');
+    if ($('btnAdminAuth')) {
+      $('btnAdminAuth').classList.remove('active');
+      $('iconAdmin').className = 'fa-solid fa-lock';
+      $('adminBtnLabel').textContent = 'Admin';
+    }
+    if (currentTab === 'tab-manual') {
+      document.querySelector('.tab-btn[data-tab="tab-live"]')?.click();
+    }
+  }
+}
+
+function handleAdminAuthClick() {
+  const isAdmin = localStorage.getItem('ws_is_admin') === 'true';
+  if (isAdmin) {
+    if (confirm('Exit Admin Mode? (Custom input and clear data will be hidden)')) {
+      localStorage.removeItem('ws_is_admin');
+      applyAdminState(false);
+      logMsg('Exited Admin Mode.', 'SYS');
+    }
+  } else {
+    const entered = prompt('Enter Owner Admin PIN:');
+    if (entered === null) return;
+    if (entered.trim() === getAdminPin()) {
+      localStorage.setItem('ws_is_admin', 'true');
+      applyAdminState(true);
+      alert('Admin Mode Unlocked!\n\n"Input Custom Data" and "Clear Data" are now available.');
+      logMsg('Admin Mode unlocked via PIN.', 'SYS');
+    } else {
+      alert('Incorrect Admin PIN.');
+    }
+  }
+}
+
+/* =====================================================================
+   Modal Controls
+   ===================================================================== */
+function openConfigModal() {
+  $('cfgDbUrl').value = fbConfig.dbUrl || '';
+  $('cfgApiKey').value = fbConfig.apiKey || '';
+  $('cfgProjId').value = fbConfig.projectId || '';
+  $('cfgAdminPin').value = getAdminPin();
+  $('cfgModal').classList.add('open');
+}
+
+function closeConfigModal() {
+  $('cfgModal').classList.remove('open');
+}
+
+function saveConfigModal() {
+  fbConfig = {
+    dbUrl: $('cfgDbUrl').value.trim(),
+    apiKey: $('cfgApiKey').value.trim(),
+    projectId: $('cfgProjId').value.trim()
+  };
+  localStorage.setItem('ws_fb_config', JSON.stringify(fbConfig));
+
+  const pinVal = $('cfgAdminPin').value.trim();
+  if (pinVal) {
+    localStorage.setItem('ws_admin_pin', pinVal);
+  }
+
+  closeConfigModal();
+  setupFirebaseConnection();
+  logMsg('Firebase & Admin settings updated.', 'FB');
+}
+
+/* =====================================================================
+   Tabs
+   ===================================================================== */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const tabId = btn.dataset.tab;
+    $(tabId).classList.add('active');
+    currentTab = tabId;
+
+    if (tabId === 'tab-day') loadDayHistory();
+    if (tabId === 'tab-week') loadWeekHistory();
+    if (tabId === 'tab-month') loadMonthHistory();
+  });
+});
+
+/* =====================================================================
+   Date Pickers
+   ===================================================================== */
+const todayStr = new Date().toISOString().split('T')[0];
+const curMonthStr = todayStr.substring(0, 7);
+$('dayPicker').value = todayStr;
+$('monthPicker').value = curMonthStr;
+
+function resetDayToday() { $('dayPicker').value = todayStr; loadDayHistory(); }
+function shiftDay(days) {
+  const d = new Date($('dayPicker').value);
+  d.setDate(d.getDate() + days);
+  $('dayPicker').value = d.toISOString().split('T')[0];
+  loadDayHistory();
+}
+
+let weekOffsetDays = 0;
+function resetWeekCurrent() { weekOffsetDays = 0; loadWeekHistory(); }
+function shiftWeek(days) { weekOffsetDays += days; loadWeekHistory(); }
+
+function resetMonthCurrent() { $('monthPicker').value = curMonthStr; loadMonthHistory(); }
+function shiftMonth(months) {
+  const parts = $('monthPicker').value.split('-');
+  const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1 + months, 1);
+  $('monthPicker').value = d.toISOString().substring(0, 7);
+  loadMonthHistory();
+}
+
+/* =====================================================================
+   Logging
+   ===================================================================== */
+function logMsg(msg, tag = 'SYS') {
+  const ts = new Date().toLocaleTimeString();
+  const row = document.createElement('div');
+  row.className = 'log-row';
+  let tagCls = 'ts';
+  if (tag === 'WIND') tagCls = 'tag-wind';
+  if (tag === 'DIR') tagCls = 'tag-dir';
+  if (tag === 'RAIN') tagCls = 'tag-rain';
+  if (tag === 'FB') tagCls = 'tag-fb';
+  row.innerHTML = `<span class="ts">[${ts}]</span> <span class="${tagCls}">[${tag}]</span> ${msg}`;
+  const term = $('termLog');
+  term.appendChild(row);
+  while (term.childElementCount > 300) term.removeChild(term.firstChild);
+  term.scrollTop = term.scrollHeight;
+}
+function clearLogs() { $('termLog').innerHTML = ''; }
+
+function setTxt(id, val) {
+  const el = $(id);
+  if (el) el.textContent = val;
+}
+function setHtml(id, val) {
+  const el = $(id);
+  if (el) el.innerHTML = val;
+}
+
+/* =====================================================================
+   Live Display Update
+   ===================================================================== */
+function updateLiveDisplay(data) {
+  lastSyncTime = Date.now();
+  $('connStatus').className = 'status-pill online';
+  $('connStatusText').textContent = isSimulating ? 'Demo Mode' : (usbPort ? 'USB Serial Live' : 'Firebase Live');
+
+  if (data.wind) {
+    const spd = data.wind.speed_kmh || 0;
+    const rpm = data.wind.rpm || 0;
+    const maxSpd = data.wind.speed_max_kmh || spd;
+    if (maxSpd > peakGustRecorded) peakGustRecorded = maxSpd;
+
+    setTxt('v-speed', spd.toFixed(1));
+    setTxt('v-rpm', rpm.toFixed(1));
+    setTxt('v-maxwind', peakGustRecorded.toFixed(1));
+    setTxt('v-maxwind-giant', Math.round(peakGustRecorded));
+    setTxt('s-speed', `${rpm.toFixed(1)} RPM | ${maxSpd.toFixed(1)} km/h max`);
+    setTxt('s-spins', `Total: ${data.wind.total_spins || 0} spins`);
+
+    const deg = data.wind.degrees !== undefined ? data.wind.degrees : 0;
+    setTxt('v-deg', deg.toFixed(1));
+    setTxt('v-deg-giant', Math.round(deg));
+    setTxt('v-cardinal', data.wind.compass || COMPASS[Math.round(deg / 22.5) % 16]);
+    if ($('needle')) $('needle').style.transform = `rotate(${deg}deg)`;
+
+    pushLiveWindPoint(spd, rpm);
+    pushWindRosePoint(spd, deg);
+  }
+
+  if (data.rain) {
+    const rate = data.rain.rate_mm_h || 0;
+    setTxt('v-rate', rate.toFixed(1));
+    setTxt('v-today', (data.rain.today_mm || 0).toFixed(2));
+    setTxt('v-week', (data.rain.week_mm || 0).toFixed(2));
+    setTxt('v-month', (data.rain.month_mm || 0).toFixed(2));
+    setTxt('s-hour', `Last hour: ${(data.rain.last_hour_mm || 0).toFixed(2)} mm`);
+    setTxt('s-tips', `Total: ${(data.rain.total_mm || 0).toFixed(1)} mm | ${data.rain.total_tips || 0} tips`);
+
+    const isRaining = data.rain.is_raining || (rate > 0);
+    setHtml('v-status', isRaining
+      ? `<span class="badge badge-rain"><i class="fa-solid fa-cloud-rain"></i> RAINING</span>`
+      : `<span class="badge badge-dry">DRY</span>`);
+
+    pushLiveRainPoint(rate, data.rain.today_mm || 0);
+  }
+
+  if (data.system) {
+    const uptime = data.system.uptime_sec || 0;
+    const h = Math.floor(uptime / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
+    const s = uptime % 60;
+    setTxt('d-uptime', `${h}h ${m}m ${s}s`);
+    setTxt('d-rssi', data.system.wifi_rssi || '--');
+    setTxt('d-heap', data.system.free_heap || '--');
+    setTxt('d-sync', new Date().toLocaleTimeString());
+    setTxt('d-sync-age', 'Just now');
+  }
+}
+
+function pushLiveWindPoint(speed, rpm) {
+  if (!chLiveWind) return;
+  const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  
+  chLiveWind.data.labels = liveWindPts.labels;
+  chLiveWind.data.datasets[0].data = liveWindPts.speed;
+  chLiveWind.data.datasets[1].data = liveWindPts.rpm;
+
+  liveWindPts.labels.push(ts);
+  liveWindPts.speed.push(speed);
+  liveWindPts.rpm.push(rpm);
+
+  if (liveWindPts.labels.length > 25) {
+    liveWindPts.labels.shift();
+    liveWindPts.speed.shift();
+    liveWindPts.rpm.shift();
+  }
+  chLiveWind.update('none');
+}
+
+function pushLiveRainPoint(rate, total) {
+  if (!chLiveRain) return;
+  const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+
+  chLiveRain.data.labels = liveRainPts.labels;
+  chLiveRain.data.datasets[0].data = liveRainPts.rate;
+  chLiveRain.data.datasets[1].data = liveRainPts.total;
+
+  liveRainPts.labels.push(ts);
+  liveRainPts.rate.push(rate);
+  liveRainPts.total.push(total);
+
+  if (liveRainPts.labels.length > 25) {
+    liveRainPts.labels.shift();
+    liveRainPts.rate.shift();
+    liveRainPts.total.shift();
+  }
+  chLiveRain.update('none');
+}
+
+const windRoseBuffer = [];
+
+function pushWindRosePoint(speed, degrees) {
+  const sectorIdx = Math.floor(((degrees + 22.5) % 360) / 45);
+  let tier = 0;
+  if (speed >= 35) tier = 5;
+  else if (speed >= 25) tier = 4;
+  else if (speed >= 18) tier = 3;
+  else if (speed >= 10) tier = 2;
+  else if (speed >= 5) tier = 1;
+  else tier = 0;
+
+  windRoseBuffer.push({ sector: sectorIdx, tier: tier });
+  if (windRoseBuffer.length > 100) windRoseBuffer.shift();
+
+  renderGrafanaWindRose();
+}
+
+function renderGrafanaWindRose() {
+  try {
+    const canvas = $('cvGrafanaWindRose');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const parent = canvas.parentElement;
+
+    const w = rect.width || (parent ? parent.clientWidth : 0) || 240;
+    const h = rect.height || (parent ? parent.clientHeight : 0) || 240;
+
+    if (w <= 20 || h <= 20) return;
+
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const maxR = Math.max(15, Math.min(cx, cy) - 24);
+
+    // 1. Draw 4 Concentric Dashed Circle Rings (10%, 20%, 30%, 40%)
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 1;
+
+    for (let i = 1; i <= 4; i++) {
+      const r = (maxR / 4) * i;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 2. Draw 8 Radial Spokes
+    ctx.save();
+    ctx.strokeStyle = '#4b5563';
+    ctx.lineWidth = 1;
+    const sectors = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const angles = [
+      -Math.PI / 2,         // N
+      -Math.PI / 4,         // NE
+      0,                    // E
+      Math.PI / 4,          // SE
+      Math.PI / 2,          // S
+      (3 * Math.PI) / 4,    // SW
+      Math.PI,              // W
+      (-3 * Math.PI) / 4    // NW
+    ];
+
+    for (let i = 0; i < 8; i++) {
+      const a = angles[i];
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * (maxR + 4), cy + Math.sin(a) * (maxR + 4));
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 3. Draw Direction Labels (N, NE, E, SE, S, SW, W, NW)
+    ctx.save();
+    ctx.fillStyle = '#f3f4f6';
+    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i < 8; i++) {
+      const a = angles[i];
+      const offset = 14;
+      const lx = cx + Math.cos(a) * (maxR + offset);
+      const ly = cy + Math.sin(a) * (maxR + offset);
+      ctx.fillText(sectors[i], lx, ly);
+    }
+    ctx.restore();
+
+    // 4. Draw % Ticks Vertically along North Axis
+    ctx.save();
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (let i = 1; i <= 4; i++) {
+      const r = (maxR / 4) * i;
+      ctx.fillText(`${i * 10}%`, cx, cy - r + 3);
+    }
+    ctx.restore();
+
+    // 5. Draw Stacked Polar Wedge Arcs (Exact Grafana Colors)
+    const tierColors = [
+      '#3b82f6', // 0-1 mph (Dark Blue)
+      '#38bdf8', // 1-2 mph (Light Blue)
+      '#2dd4bf', // 2-3 mph (Cyan)
+      '#4ade80', // 3-4 mph (Green)
+      '#a3e635', // 4-5 mph (Lime)
+      '#facc15'  // 5-6 mph (Yellow)
+    ];
+
+    const counts = Array.from({length: 6}, () => Array(8).fill(0));
+    const total = windRoseBuffer.length || 1;
+    windRoseBuffer.forEach(item => {
+      if (item.sector >= 0 && item.sector < 8 && item.tier >= 0 && item.tier < 6) {
+        counts[item.tier][item.sector]++;
+      }
+    });
+
+    const wedgeAngle = (Math.PI * 2) / 8; // 45 degrees
+    const halfAngle = wedgeAngle / 2;
+
+    for (let s = 0; s < 8; s++) {
+      const centerAngle = angles[s];
+      const startAngle = centerAngle - halfAngle * 0.82;
+      const endAngle = centerAngle + halfAngle * 0.82;
+
+      let accumPct = 0;
+      for (let t = 0; t < 6; t++) {
+        const pct = (counts[t][s] / total) * 100;
+        if (pct <= 0) continue;
+
+        const innerR = (accumPct / 40) * maxR;
+        accumPct += pct;
+        const outerR = (Math.min(40, accumPct) / 40) * maxR;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerR, startAngle, endAngle);
+        ctx.arc(cx, cy, innerR, endAngle, startAngle, true);
+        ctx.closePath();
+        ctx.fillStyle = tierColors[t];
+        ctx.fill();
+        ctx.strokeStyle = '#0b0f17';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  } catch (err) {
+    console.warn('Grafana Wind Rose render exception:', err);
+  }
+}
+
+window.addEventListener('resize', renderGrafanaWindRose);
+
+/* =====================================================================
+   Chart Setup
+   ===================================================================== */
+function initCharts() {
+  const chartStyle = { color: '#9ca3af', font: { family: 'JetBrains Mono', size: 11 } };
+  const gridStyle = { color: '#1f2937' };
+
+  renderGrafanaWindRose();
+
+  chLiveWind = new Chart($('chLiveWind').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: liveWindPts.labels,
+      datasets: [
+        {
+          label: 'Wind Speed (km/h)',
+          data: liveWindPts.speed,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+          fill: true,
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 2
+        },
+        {
+          label: 'RPM',
+          data: liveWindPts.rpm,
+          borderColor: '#6366f1',
+          borderWidth: 1.5,
+          borderDash: [3, 3],
+          pointRadius: 0,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: chartStyle, grid: gridStyle },
+        y: { ticks: chartStyle, grid: gridStyle, min: 0, title: { display: true, text: 'km/h', color: '#9ca3af' } },
+        y1: { position: 'right', ticks: chartStyle, grid: { display: false }, min: 0, title: { display: true, text: 'RPM', color: '#9ca3af' } }
+      },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chLiveRain = new Chart($('chLiveRain').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: liveRainPts.labels,
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Rain Rate (mm/h)',
+          data: liveRainPts.rate,
+          backgroundColor: 'rgba(59, 130, 246, 0.6)',
+          borderColor: '#3b82f6',
+          borderWidth: 1,
+          maxBarThickness: 32
+        },
+        {
+          type: 'line',
+          label: 'Today Accumulation (mm)',
+          data: liveRainPts.total,
+          borderColor: '#06b6d4',
+          borderWidth: 2,
+          pointRadius: 0,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: chartStyle, grid: gridStyle },
+        y: { ticks: chartStyle, grid: gridStyle, min: 0, title: { display: true, text: 'Rate (mm/h)', color: '#9ca3af' } },
+        y1: { position: 'right', ticks: chartStyle, grid: { display: false }, min: 0, title: { display: true, text: 'Total (mm)', color: '#9ca3af' } }
+      },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chDayWind = new Chart($('chDayWind').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: Array.from({length:24}, (_,i) => `${i}:00`),
+      datasets: [
+        { label: 'Avg Speed (km/h)', data: Array(24).fill(0), borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.15)', fill: true, tension: 0.3 },
+        { label: 'Peak Gust (km/h)', data: Array(24).fill(0), borderColor: '#f59e0b', borderWidth: 1.5, borderDash: [3,3], pointRadius: 2 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { x: { ticks: chartStyle, grid: gridStyle }, y: { ticks: chartStyle, grid: gridStyle, min: 0 } },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chDayRain = new Chart($('chDayRain').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:24}, (_,i) => `${i}:00`),
+      datasets: [{ label: 'Hourly Rain (mm)', data: Array(24).fill(0), backgroundColor: '#3b82f6', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { x: { ticks: chartStyle, grid: gridStyle }, y: { ticks: chartStyle, grid: gridStyle, min: 0 } },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chWeekRain = new Chart($('chWeekRain').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      datasets: [{ label: 'Rain (mm)', data: [0,0,0,0,0,0,0], backgroundColor: '#3b82f6', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { x: { ticks: chartStyle, grid: gridStyle }, y: { ticks: chartStyle, grid: gridStyle, min: 0 } },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chWeekWind = new Chart($('chWeekWind').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      datasets: [
+        { label: 'Avg Wind (km/h)', data: [0,0,0,0,0,0,0], backgroundColor: '#10b981', borderRadius: 4 },
+        { label: 'Max Gust (km/h)', data: [0,0,0,0,0,0,0], backgroundColor: '#f59e0b', borderRadius: 4 }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { x: { ticks: chartStyle, grid: gridStyle }, y: { ticks: chartStyle, grid: gridStyle, min: 0 } },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+
+  chMonth = new Chart($('chMonth').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: Array.from({length:31}, (_,i) => `${i+1}`),
+      datasets: [
+        { type: 'bar', label: 'Daily Rain (mm)', data: Array(31).fill(0), backgroundColor: '#3b82f6', borderRadius: 3, yAxisID: 'y' },
+        { type: 'line', label: 'Cumulative Rain (mm)', data: Array(31).fill(0), borderColor: '#06b6d4', borderWidth: 2, fill: false, yAxisID: 'y1' },
+        { type: 'line', label: 'Peak Gust (km/h)', data: Array(31).fill(0), borderColor: '#f59e0b', borderDash: [3,3], borderWidth: 1.5, pointRadius: 0, yAxisID: 'y2' }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: chartStyle, grid: gridStyle, title: { display: true, text: 'Day of Month', color: '#9ca3af' } },
+        y: { ticks: chartStyle, grid: gridStyle, min: 0, title: { display: true, text: 'Rain (mm)', color: '#9ca3af' } },
+        y1: { position: 'right', ticks: chartStyle, grid: { display: false }, min: 0, title: { display: true, text: 'Cumulative (mm)', color: '#9ca3af' } },
+        y2: { display: false, min: 0 }
+      },
+      plugins: { legend: { labels: { color: '#f3f4f6', font: { family: 'JetBrains Mono', size: 11 } } } }
+    }
+  });
+}
+
+/* =====================================================================
+   History Data Fetching
+   ===================================================================== */
+async function fetchFirebaseData(path) {
+  if (isSimulating) return getSimulatedData(path);
+
+  if (fbDb) {
+    try {
+      const snap = await fbDb.ref('weather/' + path).once('value');
+      const val = snap.val();
+      if (val !== null) return val;
+    } catch (e) {
+      // Quietly fall through to REST endpoint
+    }
+  }
+
+  let host = fbConfig.dbUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  let url = `https://${host}/weather/${path}.json`;
+  if (fbConfig.apiKey) url += `?auth=${fbConfig.apiKey}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    return null;
+  }
+}
+
+async function loadDayHistory() {
+  const selDate = $('dayPicker').value;
+  const hourlyData = await fetchFirebaseData(`history/hourly/${selDate}`) || {};
+  const dailySummary = await fetchFirebaseData(`history/daily/${selDate}`) || {};
+
+  const isToday = (selDate === todayStr);
+  const liveTodayRain = parseFloat($('v-today')?.textContent || '0') || 0;
+  const liveCurWind = parseFloat($('v-speed')?.textContent || '0') || 0;
+  const curHour = new Date().getHours();
+
+  const hours = Array.from({length:24}, (_,i) => i < 10 ? `0${i}` : `${i}`);
+  const rainArr = [];
+  const windAvgArr = [];
+  const windMaxArr = [];
+  let totalRain = 0, peakGust = 0, windSum = 0, sampleSum = 0;
+  let dirCounts = {};
+  let tableHtml = '';
+
+  hours.forEach(h => {
+    let entry = hourlyData[h] || hourlyData[parseInt(h)] || {};
+    let rain = entry.rain_mm || 0;
+    let avgWind = entry.wind_avg_kmh || 0;
+    let maxWind = entry.wind_max_kmh || avgWind;
+    let dir = entry.wind_dir_compass || '--';
+    let samples = entry.samples || 0;
+
+    // If viewing today and this is the current active hour, blend live readings if not rolled yet
+    if (isToday && parseInt(h) === curHour && samples === 0) {
+      rain = Math.max(0, liveTodayRain - totalRain);
+      avgWind = liveCurWind;
+      maxWind = Math.max(liveCurWind, peakGustRecorded);
+      dir = $('v-cardinal')?.textContent || '--';
+      samples = 1;
+    }
+
+    rainArr.push(rain);
+    windAvgArr.push(avgWind);
+    windMaxArr.push(maxWind);
+
+    totalRain += rain;
+    if (maxWind > peakGust) peakGust = maxWind;
+    windSum += avgWind * (samples || 1);
+    sampleSum += (samples || 1);
+
+    if (dir !== '--') dirCounts[dir] = (dirCounts[dir] || 0) + (samples || 1);
+
+    tableHtml += `<tr>
+      <td>${h}:00</td>
+      <td><span class="${rain > 0 ? 'c-rain' : ''}" style="font-weight:600">${rain.toFixed(2)}</span></td>
+      <td>${avgWind.toFixed(1)}</td>
+      <td>${maxWind.toFixed(1)}</td>
+      <td><span class="badge badge-wind">${dir}</span></td>
+      <td>${samples}</td>
+    </tr>`;
+  });
+
+  $('tbDayBody').innerHTML = tableHtml;
+
+  let domDir = '--', maxC = 0;
+  for (let d in dirCounts) {
+    if (dirCounts[d] > maxC) { maxC = dirCounts[d]; domDir = d; }
+  }
+
+  const finalDayRain = dailySummary.rain_mm !== undefined ? dailySummary.rain_mm : (isToday ? Math.max(totalRain, liveTodayRain) : totalRain);
+  const finalDayMaxWind = dailySummary.wind_max_kmh !== undefined ? dailySummary.wind_max_kmh : (isToday ? Math.max(peakGust, peakGustRecorded) : peakGust);
+
+  $('h-day-rain').textContent = finalDayRain.toFixed(2);
+  $('h-day-rain-sub').textContent = finalDayRain > 0 ? 'Precipitation recorded' : 'Dry all day';
+  $('h-day-maxwind').textContent = finalDayMaxWind.toFixed(1);
+  $('h-day-avgwind').textContent = (sampleSum > 0 ? (windSum / sampleSum) : 0).toFixed(1);
+  $('h-day-dir').textContent = domDir;
+
+  chDayWind.data.datasets[0].data = windAvgArr;
+  chDayWind.data.datasets[1].data = windMaxArr;
+  chDayWind.update();
+
+  chDayRain.data.datasets[0].data = rainArr;
+  chDayRain.update();
+}
+
+async function loadWeekHistory() {
+  const refDate = new Date();
+  refDate.setDate(refDate.getDate() + weekOffsetDays);
+
+  const dates = [];
+  const dayLabels = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(refDate);
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().split('T')[0]);
+    dayLabels.push(d.toLocaleDateString([], {weekday:'short', month:'numeric', day:'numeric'}));
+  }
+
+  $('weekLabel').textContent = `${dates[0]} → ${dates[6]}`;
+
+  const liveTodayRain = parseFloat($('v-today')?.textContent || '0') || 0;
+  const liveCurWind = parseFloat($('v-speed')?.textContent || '0') || 0;
+
+  const rainArr = [];
+  const windAvgArr = [];
+  const windMaxArr = [];
+  let weekRain = 0, weekMaxGust = 0, wettestDay = '--', maxDayRain = 0, windSum = 0;
+  let tableHtml = '';
+
+  for (let i = 0; i < dates.length; i++) {
+    const dateStr = dates[i];
+    const data = await fetchFirebaseData(`history/daily/${dateStr}`) || {};
+    let rain = data.rain_mm || 0;
+    let avgWind = data.wind_avg_kmh || 0;
+    let maxWind = data.wind_max_kmh || avgWind;
+
+    // Blend live today reading if looking at today
+    if (dateStr === todayStr && rain === 0 && liveTodayRain > 0) {
+      rain = liveTodayRain;
+      avgWind = liveCurWind;
+      maxWind = Math.max(maxWind, peakGustRecorded);
+    }
+
+    rainArr.push(rain);
+    windAvgArr.push(avgWind);
+    windMaxArr.push(maxWind);
+
+    weekRain += rain;
+    if (maxWind > weekMaxGust) weekMaxGust = maxWind;
+    if (rain > maxDayRain) { maxDayRain = rain; wettestDay = dayLabels[i]; }
+    windSum += avgWind;
+
+    tableHtml += `<tr>
+      <td><strong>${dayLabels[i]}</strong> (${dateStr})</td>
+      <td><span class="${rain > 0 ? 'c-rain' : ''}" style="font-weight:600">${rain.toFixed(2)}</span></td>
+      <td>${avgWind.toFixed(1)}</td>
+      <td>${maxWind.toFixed(1)}</td>
+      <td>${rain > 0 ? '<span class="badge badge-rain">Rain</span>' : '<span class="badge badge-dry">Dry</span>'}</td>
+    </tr>`;
+  }
+
+  $('tbWeekBody').innerHTML = tableHtml;
+
+  $('h-week-rain').textContent = weekRain.toFixed(2);
+  $('h-week-rain-sub').textContent = `${rainArr.filter(r => r > 0).length} rainy days`;
+  $('h-week-maxwind').textContent = weekMaxGust.toFixed(1);
+  $('h-week-wettest').textContent = wettestDay;
+  $('h-week-wettest-val').textContent = `${maxDayRain.toFixed(2)} mm`;
+  $('h-week-avgwind').textContent = (windSum / dates.length).toFixed(1);
+
+  chWeekRain.data.labels = dayLabels;
+  chWeekRain.data.datasets[0].data = rainArr;
+  chWeekRain.update();
+
+  chWeekWind.data.labels = dayLabels;
+  chWeekWind.data.datasets[0].data = windAvgArr;
+  chWeekWind.data.datasets[1].data = windMaxArr;
+  chWeekWind.update();
+}
+
+async function loadMonthHistory() {
+  const monthStr = $('monthPicker').value;
+  const parts = monthStr.split('-');
+  const year = parseInt(parts[0]);
+  const month = parseInt(parts[1]);
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const labels = Array.from({length:daysInMonth}, (_,i) => `${i+1}`);
+  const liveTodayRain = parseFloat($('v-today')?.textContent || '0') || 0;
+
+  const rainArr = [];
+  const cumRainArr = [];
+  const windMaxArr = [];
+
+  let monthRain = 0, monthMaxGust = 0, rainyDays = 0, recordedDays = 0;
+  let tableHtml = '';
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayPad = day < 10 ? `0${day}` : `${day}`;
+    const dateStr = `${monthStr}-${dayPad}`;
+    const data = await fetchFirebaseData(`history/daily/${dateStr}`) || {};
+
+    let rain = data.rain_mm || 0;
+    let avgWind = data.wind_avg_kmh || 0;
+    let maxWind = data.wind_max_kmh || avgWind;
+
+    // Blend live today reading
+    if (dateStr === todayStr && rain === 0 && liveTodayRain > 0) {
+      rain = liveTodayRain;
+      maxWind = Math.max(maxWind, peakGustRecorded);
+    }
+
+    rainArr.push(rain);
+    monthRain += rain;
+    cumRainArr.push(monthRain);
+    windMaxArr.push(maxWind);
+
+    if (rain > 0) rainyDays++;
+    if (data.samples || data.rain_mm !== undefined || dateStr === todayStr) recordedDays++;
+    if (maxWind > monthMaxGust) monthMaxGust = maxWind;
+
+    tableHtml += `<tr>
+      <td>${dateStr}</td>
+      <td><span class="${rain > 0 ? 'c-rain' : ''}" style="font-weight:600">${rain.toFixed(2)}</span></td>
+      <td>${avgWind.toFixed(1)}</td>
+      <td>${maxWind.toFixed(1)}</td>
+      <td>${data.samples || (dateStr === todayStr ? 1 : 0)}</td>
+    </tr>`;
+  }
+
+  $('tbMonthBody').innerHTML = tableHtml;
+
+  $('h-month-rain').textContent = monthRain.toFixed(2);
+  $('h-month-rain-sub').textContent = `Total for ${monthStr}`;
+  $('h-month-maxwind').textContent = monthMaxGust.toFixed(1);
+  $('h-month-raindays').textContent = rainyDays;
+  $('h-month-daysrecorded').textContent = `${recordedDays} / ${daysInMonth}`;
+
+  chMonth.data.labels = labels;
+  chMonth.data.datasets[0].data = rainArr;
+  chMonth.data.datasets[1].data = cumRainArr;
+  chMonth.data.datasets[2].data = windMaxArr;
+  chMonth.update();
+}
+
+/* =====================================================================
+   CSV Exporting
+   ===================================================================== */
+function downloadCsv(filename, rows) {
+  const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+  const link = document.createElement("a");
+  link.setAttribute("href", encodeURI(csvContent));
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function exportDayCsv() {
+  const date = $('dayPicker').value;
+  const rows = [["Time", "Rain_mm", "Avg_Wind_kmh", "Max_Gust_kmh", "Heading", "Samples"]];
+  document.querySelectorAll('#tbDayBody tr').forEach(tr => {
+    const cols = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
+    if (cols.length === 6) rows.push(cols);
+  });
+  downloadCsv(`weather-day-${date}.csv`, rows);
+}
+
+function exportWeekCsv() {
+  const rows = [["Day", "Rain_mm", "Avg_Wind_kmh", "Max_Gust_kmh", "Status"]];
+  document.querySelectorAll('#tbWeekBody tr').forEach(tr => {
+    const cols = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
+    if (cols.length === 5) rows.push(cols);
+  });
+  downloadCsv(`weather-week.csv`, rows);
+}
+
+function exportMonthCsv() {
+  const month = $('monthPicker').value;
+  const rows = [["Date", "Rain_mm", "Avg_Wind_kmh", "Max_Gust_kmh", "Samples"]];
+  document.querySelectorAll('#tbMonthBody tr').forEach(tr => {
+    const cols = Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim());
+    if (cols.length === 5) rows.push(cols);
+  });
+  downloadCsv(`weather-month-${month}.csv`, rows);
+}
+
+/* =====================================================================
+   Manual Data Injection (User Custom Data)
+   ===================================================================== */
+function getManualInputPayload() {
+  const spd = parseFloat($('inSpeed').value) || 0;
+  const rpm = parseFloat($('inRpm').value) || 0;
+  const deg = parseFloat($('inDeg').value) || 0;
+  const rate = parseFloat($('inRate').value) || 0;
+  const today = parseFloat($('inToday').value) || 0;
+  const week = parseFloat($('inWeek').value) || 0;
+  const month = parseFloat($('inMonth').value) || 0;
+  const total = parseFloat($('inTotal').value) || 0;
+
+  return {
+    wind: {
+      speed_kmh: spd,
+      rpm: rpm,
+      degrees: deg,
+      compass: COMPASS[Math.round(deg / 22.5) % 16],
+      total_spins: Math.round(rpm * 10),
+      raw_angle: Math.round(deg / 360 * 4096),
+      magnet_valid: true
+    },
+    rain: {
+      rate_mm_h: rate,
+      last_hour_mm: Math.min(rate, today),
+      today_mm: today,
+      week_mm: week,
+      month_mm: month,
+      total_mm: total,
+      total_tips: Math.round(total / 0.2794),
+      is_raining: rate > 0
+    },
+    system: {
+      uptime_sec: 18000,
+      wifi_rssi: -56,
+      free_heap: 28160,
+      timestamp: Date.now()
+    }
+  };
+}
+
+function applyManualToUI() {
+  const payload = getManualInputPayload();
+  updateLiveDisplay(payload);
+  logMsg('Applied manual test values to UI display.', 'SYS');
+  alert('Manual values applied to live dashboard!');
+}
+
+async function pushManualLiveToFirebase() {
+  const payload = getManualInputPayload();
+  try {
+    if (fbDb) {
+      await fbDb.ref('weather/current').set(payload);
+      logMsg('Successfully pushed manual telemetry to Firebase (/weather/current)', 'FB');
+      alert('Successfully pushed data to Firebase!');
+      return;
+    }
+    let host = fbConfig.dbUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    let url = `https://${host}/weather/current.json`;
+    if (fbConfig.apiKey) url += `?auth=${fbConfig.apiKey}`;
+    const res = await fetch(url, { method: 'PUT', body: JSON.stringify(payload) });
+    if (res.ok) {
+      logMsg('Successfully pushed manual telemetry to Firebase via REST', 'FB');
+      alert('Successfully pushed data to Firebase!');
+    } else {
+      throw new Error(`HTTP ${res.status}`);
+    }
+  } catch (e) {
+    alert(`Failed to push to Firebase: ${e.message}`);
+    logMsg(`Manual push error: ${e.message}`, 'FB');
+  }
+}
+
+async function injectTestHistory() {
+  const curDate = $('dayPicker').value || todayStr;
+  const curMonth = $('monthPicker').value || curMonthStr;
+
+  if (!confirm(`Generate and save test 24-hour hourly history for ${curDate} and monthly summary for ${curMonth} into Firebase?`)) return;
+
+  try {
+    const hourlyTree = {};
+    let dayRain = 0, dayMaxWind = 0, dayWindSum = 0;
+
+    for (let h = 0; h < 24; h++) {
+      const hStr = h < 10 ? `0${h}` : `${h}`;
+      const r = Math.max(0, parseFloat((Math.sin(h / 3) * 1.6 + (Math.random() - 0.4)).toFixed(2)));
+      const w = parseFloat((6 + Math.cos(h / 4) * 5 + Math.random() * 6).toFixed(1));
+      const wMax = parseFloat((w * (1.3 + Math.random() * 0.4)).toFixed(1));
+      const heading = (h * 15) % 360;
+
+      dayRain += r;
+      if (wMax > dayMaxWind) dayMaxWind = wMax;
+      dayWindSum += w;
+
+      hourlyTree[hStr] = {
+        hour: h,
+        rain_mm: r,
+        wind_avg_kmh: w,
+        wind_max_kmh: wMax,
+        wind_dir_compass: COMPASS[Math.round(heading / 22.5) % 16],
+        samples: 60,
+        timestamp: Date.now() - ((23 - h) * 3600000)
+      };
+    }
+
+    const dailySummary = {
+      date: curDate,
+      rain_mm: parseFloat(dayRain.toFixed(2)),
+      wind_avg_kmh: parseFloat((dayWindSum / 24).toFixed(1)),
+      wind_max_kmh: dayMaxWind,
+      samples: 1440,
+      last_updated: Date.now()
+    };
+
+    if (fbDb) {
+      await fbDb.ref(`weather/history/hourly/${curDate}`).set(hourlyTree);
+      await fbDb.ref(`weather/history/daily/${curDate}`).set(dailySummary);
+      await fbDb.ref(`weather/history/monthly/${curMonth}`).update({
+        month: curMonth,
+        rain_mm: parseFloat((dayRain * 4.5).toFixed(2)),
+        wind_max_kmh: dayMaxWind,
+        last_updated: Date.now()
+      });
+    }
+
+    logMsg(`Generated & pushed 24h history for ${curDate} to Firebase!`, 'FB');
+    alert(`Success! Generated 24-hour history for ${curDate} in Firebase.`);
+    loadDayHistory();
+  } catch (e) {
+    alert(`Failed to save test history: ${e.message}`);
+    logMsg(`History injection error: ${e.message}`, 'FB');
+  }
+}
+
+/* =====================================================================
+   Firebase Connection
+   ===================================================================== */
+function setupFirebaseConnection() {
+  try {
+    const config = {
+      databaseURL: fbConfig.dbUrl,
+      projectId: fbConfig.projectId,
+      apiKey: fbConfig.apiKey
+    };
+
+    if (!firebase.apps.length) {
+      fbApp = firebase.initializeApp(config);
+    } else {
+      fbApp = firebase.app();
+    }
+    fbDb = firebase.database();
+
+    logMsg(`Connecting to Firebase: ${fbConfig.dbUrl}`, 'FB');
+
+    fbDb.ref('.info/connected').on('value', snap => {
+      if (snap.val() === true) {
+        if (!isSimulating) {
+          $('connStatus').className = 'status-pill online';
+          $('connStatusText').textContent = 'Firebase Live';
+          logMsg('Connected to Firebase Realtime Database.', 'FB');
+        }
+      } else {
+        if (!isSimulating) {
+          $('connStatus').className = 'status-pill offline';
+          $('connStatusText').textContent = 'Connecting...';
+        }
+      }
+    });
+
+    fbDb.ref('weather/current').on('value', snapshot => {
+      const val = snapshot.val();
+      if (val) updateLiveDisplay(val);
+    }, err => {
+      logMsg(`Firebase stream notice: ${err.message}`, 'FB');
+    });
+
+    // Immediate initial REST fetch for zero-delay loading
+    fetchInitialLiveTelemetry();
+
+  } catch (e) {
+    logMsg(`Firebase init error: ${e.message}`, 'FB');
+    fetchInitialLiveTelemetry();
+  }
+}
+
+async function fetchInitialLiveTelemetry() {
+  if (isSimulating || usbPort) return;
+  try {
+    let host = fbConfig.dbUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    let url = `https://${host}/weather/current.json`;
+    if (fbConfig.apiKey) url += `?auth=${fbConfig.apiKey}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && (data.wind || data.rain || data.system)) {
+        updateLiveDisplay(data);
+        if (!isSimulating && !usbPort) {
+          $('connStatus').className = 'status-pill online';
+          $('connStatusText').textContent = 'Firebase Live';
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Initial REST fetch fallback error:', e);
+  }
+}
+
+// Keep live telemetry alive even if WebSockets reconnect or are throttled on Vercel
+setInterval(() => {
+  if (isSimulating || usbPort) return;
+  if (Date.now() - lastSyncTime > 5000) {
+    fetchInitialLiveTelemetry();
+  }
+}, 4000);
+
+/* =====================================================================
+   Clear Dashboard & Memory Data
+   ===================================================================== */
+async function clearDashboardData() {
+  const choice = confirm("Clear Dashboard Data?\n\n• Resets all live dashboard readings, graphs, wind rose, and terminal logs.\n• (You will be prompted next if you also want to clear Firebase cloud records)");
+  if (!choice) return;
+
+  // 1. Reset Live Memory Arrays & Graphs (in-place)
+  liveWindPts.labels.length = 0;
+  liveWindPts.speed.length = 0;
+  liveWindPts.rpm.length = 0;
+  if (chLiveWind) {
+    chLiveWind.data.labels = liveWindPts.labels;
+    chLiveWind.data.datasets[0].data = liveWindPts.speed;
+    chLiveWind.data.datasets[1].data = liveWindPts.rpm;
+    chLiveWind.update();
+  }
+
+  liveRainPts.labels.length = 0;
+  liveRainPts.rate.length = 0;
+  liveRainPts.total.length = 0;
+  if (chLiveRain) {
+    chLiveRain.data.labels = liveRainPts.labels;
+    chLiveRain.data.datasets[0].data = liveRainPts.rate;
+    chLiveRain.data.datasets[1].data = liveRainPts.total;
+    chLiveRain.update();
+  }
+
+  // 2. Reset Wind Rose Buffer & Redraw
+  windRoseBuffer.length = 0;
+  renderGrafanaWindRose();
+
+  // 3. Reset Peak Gust & Stat Numbers
+  peakGustRecorded = 0;
+  setTxt('v-speed', '0.0');
+  setTxt('v-rpm', '0.0');
+  setTxt('v-maxwind', '0.0');
+  setTxt('v-maxwind-giant', '0');
+  setTxt('s-speed', '0.0 RPM | 0.0 km/h max');
+  setTxt('s-spins', 'Total: 0 spins');
+  setTxt('v-deg', '0.0');
+  setTxt('v-deg-giant', '0');
+  setTxt('v-cardinal', 'N');
+  setTxt('v-rate', '0.0');
+  setTxt('v-today', '0.00');
+  setTxt('v-week', '0.00');
+  setTxt('v-month', '0.00');
+  setTxt('s-hour', 'Last hour: 0.0 mm');
+  setTxt('s-tips', 'Total: 0.0 mm | 0 tips');
+  setHtml('v-status', '<span class="badge badge-dry">DRY</span>');
+
+  // 4. Clear Terminal Log
+  clearLogs();
+  logMsg('Dashboard telemetry and graphs cleared.', 'SYS');
+
+  // 5. Ask to also clear Firebase cloud database
+  if (confirm("Would you also like to wipe all history records from Firebase Realtime Database?")) {
+    await clearFirebaseCloudHistory();
+  }
+}
+
+/* =====================================================================
+   Clear Cloud History & Reset Live Firebase
+   ===================================================================== */
+async function clearFirebaseCloudHistory() {
+  const zeroPayload = {
+    wind: { speed_kmh: 0, rpm: 0, speed_max_kmh: 0, rotations: 0, total_pulses: 0, total_spins: 0, degrees: 0, compass: 'N', raw_angle: 0, magnet_valid: true },
+    rain: { rate_mm_h: 0, today_mm: 0, week_mm: 0, month_mm: 0, total_mm: 0, total_tips: 0, last_hour_mm: 0, is_raining: false },
+    system: { uptime_sec: 0, wifi_rssi: 0, free_heap: 0, timestamp: Date.now() }
+  };
+
+  try {
+    if (fbDb) {
+      await fbDb.ref('weather/history').remove();
+      await fbDb.ref('weather/current').set(zeroPayload);
+    } else {
+      let host = fbConfig.dbUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      let authParam = fbConfig.apiKey ? `?auth=${fbConfig.apiKey}` : '';
+      await fetch(`https://${host}/weather/history.json${authParam}`, { method: 'DELETE' });
+      await fetch(`https://${host}/weather/current.json${authParam}`, { method: 'PUT', body: JSON.stringify(zeroPayload) });
+    }
+    alert('Firebase Cloud Database (Live + History) has been completely reset to 0!');
+    logMsg('Firebase cloud records reset to zero.', 'FB');
+    closeConfigModal();
+    if (currentTab === 'tab-day') loadDayHistory();
+    if (currentTab === 'tab-week') loadWeekHistory();
+    if (currentTab === 'tab-month') loadMonthHistory();
+  } catch (e) {
+    alert(`Failed to reset Firebase data: ${e.message}`);
+    logMsg(`Firebase clear error: ${e.message}`, 'FB');
+  }
+}
+
+/* =====================================================================
+   Simulation Mode
+   ===================================================================== */
+function getSimulatedData(path) {
+  if (path.includes('history/hourly')) {
+    const res = {};
+    for (let h = 0; h < 24; h++) {
+      const r = Math.max(0, Math.sin(h / 3) * 1.5 + (Math.random() - 0.5));
+      const w = 6 + Math.cos(h / 4) * 4 + Math.random() * 5;
+      res[h < 10 ? `0${h}` : `${h}`] = {
+        hour: h,
+        rain_mm: parseFloat(r.toFixed(2)),
+        wind_avg_kmh: parseFloat(w.toFixed(1)),
+        wind_max_kmh: parseFloat((w * 1.4).toFixed(1)),
+        wind_dir_compass: COMPASS[(h * 2) % 16],
+        samples: 60
+      };
+    }
+    return res;
+  }
+  if (path.includes('history/daily')) {
+    const r = Math.max(0, (Math.random() * 8) - 2);
+    const w = 8 + Math.random() * 10;
+    return {
+      rain_mm: parseFloat(r.toFixed(2)),
+      wind_avg_kmh: parseFloat(w.toFixed(1)),
+      wind_max_kmh: parseFloat((w * 1.5).toFixed(1)),
+      samples: 1440
+    };
+  }
+  return null;
+}
+
+function toggleSim() {
+  isSimulating = !isSimulating;
+  if (isSimulating) {
+    $('btnSim').classList.add('active');
+    $('btnSim').innerHTML = '<i class="fa-solid fa-stop"></i> Stop Demo';
+    logMsg('Demo simulation active.', 'SYS');
+
+    // Pre-seed Wind Rose with realistic wind speed and direction distribution
+    for (let i = 0; i < 60; i++) {
+      const d = Math.random() * 360;
+      const s = Math.random() > 0.3 ? (3 + Math.random() * 20) : (22 + Math.random() * 10);
+      pushWindRosePoint(s, d);
+    }
+
+    let dir = 180, speed = 12, todayRain = 2.4, totalSpins = 620;
+    simInterval = setInterval(() => {
+      dir = (dir + (Math.random() * 20 - 10) + 360) % 360;
+      speed = Math.max(0, speed + (Math.random() * 4 - 2));
+      const rainRate = Math.random() > 0.6 ? (Math.random() * 4.5) : 0;
+      todayRain += rainRate / 720;
+      totalSpins += Math.round(speed / 3);
+
+      updateLiveDisplay({
+        wind: {
+          speed_kmh: speed,
+          rpm: speed * 3.8,
+          degrees: dir,
+          compass: COMPASS[Math.round(dir / 22.5) % 16],
+          total_spins: totalSpins,
+          raw_angle: Math.round(dir / 360 * 4096),
+          magnet_valid: true
+        },
+        rain: {
+          rate_mm_h: rainRate,
+          last_hour_mm: 0.8,
+          today_mm: todayRain,
+          week_mm: todayRain * 3.2,
+          month_mm: todayRain * 8.5,
+          total_mm: 120.4 + todayRain,
+          total_tips: Math.round(todayRain / 0.2794),
+          is_raining: rainRate > 0
+        },
+        system: {
+          uptime_sec: 14200,
+          wifi_rssi: -58,
+          free_heap: 27840,
+          timestamp: Date.now()
+        }
+      });
+    }, 1500);
+
+    if (currentTab === 'tab-day') loadDayHistory();
+    if (currentTab === 'tab-week') loadWeekHistory();
+    if (currentTab === 'tab-month') loadMonthHistory();
+  } else {
+    $('btnSim').classList.remove('active');
+    $('btnSim').innerHTML = '<i class="fa-solid fa-vial"></i> Demo Data';
+    clearInterval(simInterval);
+    logMsg('Demo simulation stopped.', 'SYS');
+  }
+}
+
+/* =====================================================================
+   Web Serial USB
+   ===================================================================== */
+async function disconnectUsb() {
+  try {
+    if (usbReader) {
+      await usbReader.cancel();
+      usbReader.releaseLock();
+    }
+    if (usbPort) {
+      await usbPort.close();
+    }
+  } catch (e) {
+    console.warn('Error during USB disconnect:', e);
+  } finally {
+    usbPort = null;
+    usbReader = null;
+    $('btnUsb').classList.remove('active');
+    $('btnUsb').innerHTML = '<i class="fa-brands fa-usb"></i> USB Serial';
+    if (!isSimulating) {
+      $('connStatus').className = 'status-pill online';
+      $('connStatusText').textContent = 'Firebase Live';
+    }
+    logMsg('USB Serial disconnected.', 'SYS');
+  }
+}
+
+$('btnUsb').onclick = async () => {
+  if (!navigator.serial) {
+    alert('Web Serial is supported on Desktop Chrome, Edge, and Opera (requires HTTPS or localhost).');
+    return;
+  }
+
+  // Toggle disconnect if already active
+  if (usbPort) {
+    await disconnectUsb();
+    return;
+  }
+
+  try {
+    usbPort = await navigator.serial.requestPort();
+    await usbPort.open({ baudRate: 115200 });
+    $('btnUsb').classList.add('active');
+    $('btnUsb').innerHTML = '<i class="fa-solid fa-link"></i> USB Connected (Click to Stop)';
+    $('connStatus').className = 'status-pill online';
+    $('connStatusText').textContent = 'USB Serial Live';
+    logMsg('Connected to ESP8266 via USB Web Serial at 115200 baud.', 'SYS');
+
+    const textDecoder = new TextDecoderStream();
+    const readableStreamClosed = usbPort.readable.pipeTo(textDecoder.writable);
+    usbReader = textDecoder.readable.getReader();
+
+    let buf = '';
+    while (true) {
+      const { value, done } = await usbReader.read();
+      if (done) break;
+      buf += value;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).replace(/\r$/, '').trim();
+        buf = buf.slice(i + 1);
+        if (line) {
+          try {
+            handleSerialLine(line);
+          } catch (err) {
+            console.error('Serial line parse error:', err);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    logMsg(`Serial Error: ${e.message}`, 'SYS');
+  } finally {
+    await disconnectUsb();
+  }
+};
+
+if (navigator.serial) {
+  navigator.serial.addEventListener('disconnect', () => {
+    logMsg('USB serial device disconnected.', 'SYS');
+    disconnectUsb();
+  });
+}
+
+let _serialState = {
+  wind: { speed_kmh: 0, rpm: 0, degrees: 0, compass: 'N', total_spins: 0, raw_angle: 0, magnet_valid: true },
+  rain: { rate_mm_h: 0, last_hour_mm: 0, today_mm: 0, week_mm: 0, month_mm: 0, total_mm: 0, total_tips: 0, is_raining: false },
+  system: { uptime_sec: 0, wifi_rssi: 0, free_heap: 0, timestamp: Date.now() }
+};
+
+function handleSerialLine(line) {
+  try {
+    if (line.startsWith('[wind]')) {
+      logMsg(line, 'WIND');
+      const deg = parseFloat((line.match(/deg=([\d.]+)/) || [])[1] || 0);
+      const raw = parseInt((line.match(/raw=(\d+)/) || [])[1] || 0);
+      const card = (line.match(/dir=([A-Z]+)/) || [])[1] || 'N';
+      _serialState.wind.degrees = deg;
+      _serialState.wind.raw_angle = raw;
+      _serialState.wind.compass = card;
+      _serialState.wind.magnet_valid = !line.includes('(!) magnet not detected');
+      _serialState.system.timestamp = Date.now();
+      updateLiveDisplay(_serialState);
+      maybeBridgeSerialToFirebase(_serialState);
+
+    } else if (line.startsWith('[speed]')) {
+      logMsg(line, 'WIND');
+      const speed = parseFloat((line.match(/Speed:\s*([\d.]+)/) || [])[1] || 0);
+      const rpm = parseFloat((line.match(/RPM:\s*([\d.]+)/) || [])[1] || 0);
+      const spins = parseInt((line.match(/Total Spins:\s*(\d+)/) || [])[1] || 0);
+      _serialState.wind.speed_kmh = speed;
+      _serialState.wind.rpm = rpm;
+      _serialState.wind.total_spins = spins;
+      _serialState.system.timestamp = Date.now();
+      updateLiveDisplay(_serialState);
+      maybeBridgeSerialToFirebase(_serialState);
+
+    } else if (line.startsWith('[rain]')) {
+      logMsg(line, 'RAIN');
+      const rate = parseFloat((line.match(/rate:\s*([\d.]+)/) || [])[1] || 0);
+      const today = parseFloat((line.match(/today:\s*([\d.]+)/) || [])[1] || 0);
+      const week = parseFloat((line.match(/week:\s*([\d.]+)/) || [])[1] || 0);
+      const month = parseFloat((line.match(/month:\s*([\d.]+)/) || [])[1] || 0);
+      const total = parseFloat((line.match(/total:\s*([\d.]+)/) || [])[1] || 0);
+      _serialState.rain.rate_mm_h = rate;
+      _serialState.rain.today_mm = today;
+      _serialState.rain.week_mm = week;
+      _serialState.rain.month_mm = month;
+      _serialState.rain.total_mm = total;
+      _serialState.rain.is_raining = rate > 0;
+      _serialState.system.timestamp = Date.now();
+      updateLiveDisplay(_serialState);
+      maybeBridgeSerialToFirebase(_serialState);
+
+    } else if (line.startsWith('[firebase]') || line.startsWith('[wifi]') || line.startsWith('[ntp]')) {
+      logMsg(line, 'FB');
+    } else {
+      logMsg(line, 'SYS');
+    }
+  } catch (e) {
+    logMsg(`Serial parse error: ${e.message}`, 'SYS');
+  }
+}
+
+let _lastFbBridgePush = 0;
+function maybeBridgeSerialToFirebase(state) {
+  const now = Date.now();
+  if (now - _lastFbBridgePush < 2500) return;
+  _lastFbBridgePush = now;
+
+  try {
+    if (fbDb) {
+      fbDb.ref('weather/current').set(state).catch(() => {});
+    } else {
+      let host = fbConfig.dbUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      let authParam = fbConfig.apiKey ? `?auth=${fbConfig.apiKey}` : '';
+      fetch(`https://${host}/weather/current.json${authParam}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state)
+      }).catch(() => {});
+    }
+  } catch(e) {}
+}
+
+/* =====================================================================
+   Init
+   ===================================================================== */
+window.addEventListener('DOMContentLoaded', () => {
+  checkAdminAuth();
+  initCharts();
+  setupFirebaseConnection();
+  logMsg('Weather Station Dashboard ready.', 'SYS');
+});
+</script>
+</body>
+</html>

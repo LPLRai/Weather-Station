@@ -5,6 +5,7 @@
 //
 
 #include "rain_gauge.h"
+#include "rain_gauge_config.h"
 #include <LittleFS.h>
 
 RainGauge rainSensor;

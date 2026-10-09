@@ -14,6 +14,8 @@
 #include "wind_speed.h"
 #include "wind_speed_config.h"
 #include "rain_gauge_config.h"
+#include "firebase_config.h"
+#include "firebase_weather.h"
 
 WindDirection windSensor;
 
@@ -75,9 +77,9 @@ void setup() {
 
   // ---------------- Rain gauge ----------------
   rainSensor.begin();
-  Serial.print(F("[rain] Sensor ready on pin "));
+  Serial.print(F("[rain] Sensor ready on pin D7 (GPIO"));
   Serial.print(RAIN_SENSOR_PIN);
-  Serial.print(F(". mm/tip="));
+  Serial.print(F("). mm/tip="));
   Serial.print(RAIN_MM_PER_TIP, 4);
   Serial.print(F("  print interval="));
   Serial.print(RAIN_PRINT_INTERVAL_MS);
@@ -86,6 +88,9 @@ void setup() {
   // ---------------- Wind speed (hall effect) ----------------
   setupWindSpeed();
   Serial.println(F("[speed] Hall sensor ready on pin D6 (GPIO12)."));
+
+  // ---------------- Firebase & Wi-Fi ----------------
+  firebaseWeather.begin();
 
   Serial.println(F("=== Setup complete, starting readings ==="));
 }
@@ -97,23 +102,24 @@ void loop() {
   readWindSpeed();
 
   // Wind direction
+  static WindReading latestWind;
   static unsigned long lastWindSample = 0;
   if (now - lastWindSample >= SAMPLE_INTERVAL_MS) {
     lastWindSample = now;
 
-    WindReading w = windSensor.read();
+    latestWind = windSensor.read();
 
     Serial.print(F("[wind] raw="));
-    Serial.print(w.rawAngle);
+    Serial.print(latestWind.rawAngle);
     Serial.print(F(" deg="));
-    Serial.print(w.degrees, 1);
+    Serial.print(latestWind.degrees, 1);
     Serial.print(F(" dir="));
-    Serial.print(w.compass);
-    if (!w.valid) {
+    Serial.print(latestWind.compass);
+    if (!latestWind.valid) {
       Serial.print(F("  (!) magnet not detected"));
-    } else if (w.tooWeak) {
+    } else if (latestWind.tooWeak) {
       Serial.print(F("  (!) magnet too weak/far"));
-    } else if (w.tooStrong) {
+    } else if (latestWind.tooStrong) {
       Serial.print(F("  (!) magnet too strong/close"));
     }
     Serial.println();
@@ -129,4 +135,9 @@ void loop() {
     lastRainPrint = now;
     rainSensor.printCompact();
   }
+
+  // Firebase Realtime Sync & History Aggregation
+  WindSpeedReading latestSpeed = getWindSpeedReading();
+  RainReading latestRain = rainSensor.getReading();
+  firebaseWeather.update(latestWind, latestSpeed, latestRain);
 }
